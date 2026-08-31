@@ -1,0 +1,39 @@
+[project]
+name = "tg-antispam-bot"
+version = "0.1.0"
+description = "AI Anti-Spam Bot для Telegram — капча-ловушка, AI-фильтр через api.vega.chat, антиспам"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "aiogram>=3.22.0",
+  "aiohttp>=3.12.0",
+  "aiosqlite>=0.21.0",
+  "openai>=1.97.0",
+  "python-dotenv>=1.1.0",
+  "pyyaml>=6.0.2",
+  "pydantic>=2.11.0",
+  "pydantic-settings>=2.10.0",
+]
+
+[project.optional-dependencies]
+dev = ["ruff>=0.12.0", "pytest>=8.4.0", "pytest-asyncio>=1.1.0"]
+
+[project.scripts]
+tg-antispam = "src.cli.manage:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+lint.select = ["E", "F", "W", "I", "B", "C4", "UP"]
+lint.ignore = ["E501"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

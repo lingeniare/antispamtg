@@ -1,0 +1,29 @@
+# venv / build
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.log
+
+# install artifacts — не коммитить
+.env
+config/config.yaml
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# secrets / local
+.env.local
+.env.*.local

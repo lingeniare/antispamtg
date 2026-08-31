@@ -1,0 +1,15 @@
+[Unit]
+Description=TG AntiSpam AI Bot (api.vega.chat)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/tg-antispam
+EnvironmentFile=/opt/tg-antispam/.env
+ExecStart=/opt/tg-antispam/.venv/bin/python -m src.bot.bot
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target

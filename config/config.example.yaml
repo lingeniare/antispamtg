@@ -1,0 +1,14 @@
+bot_token: "PUT_TOKEN_HERE"
+vega_api_key: "PUT_VEGA_KEY_HERE"
+vega_base_url: "https://api.vega.chat/v1"
+vega_model: "gpt-4o-mini"
+allowed_chats: []  # [-100123..., "@channel"]
+whitelist_users: [] # [123456]
+admin_users: []
+default_language: "ru"  # ru|en|tr|uk|kz ...
+filter_prompt_path: "config/filter_prompt.txt"
+captcha_timeout_sec: 120
+delete_spam: true
+mute_on_captcha_fail: true
+ban_on_repeat_spam: false
+# image_moderation: true  # вкл когда появится vision-модель
