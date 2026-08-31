@@ -1,12 +1,15 @@
 from __future__ import annotations
+
 import asyncio
 import logging
+
 from aiogram import Bot, Dispatcher
-from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+
+from src.bot.handlers import router
 from src.config import load_settings
 from src.storage.db import init_db
-from src.bot.handlers import router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("tg-antispam")

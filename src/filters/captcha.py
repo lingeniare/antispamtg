@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import random
 
 # Фраза-ловушка для AI на разных языках (вставляется в капчу)

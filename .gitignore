@@ -1,4 +1,4 @@
-# venv / build
+# venv / build / caches
 .venv/
 venv/
 __pycache__/
@@ -7,6 +7,9 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
 *.log
 
 # install artifacts — не коммитить

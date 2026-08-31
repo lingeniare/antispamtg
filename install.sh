@@ -127,6 +127,14 @@ else
   echo "  -> config/config.yaml уже существует, не перетерт"
 fi
 
+# systemd user
+if ! id tg-antispam &>/dev/null; then
+  sudo useradd --system --no-create-home --shell /usr/sbin/nologin tg-antispam 2>/dev/null || true
+fi
+sudo chown -R tg-antispam:tg-antispam "$INSTALL_DIR/data" 2>/dev/null || true
+sudo chown tg-antispam:tg-antispam "$INSTALL_DIR/.env" 2>/dev/null || true
+sudo chmod 600 "$INSTALL_DIR/.env" 2>/dev/null || true
+
 # systemd
 echo "[5/6] Настройка systemd..."
 sudo cp systemd/tg-antispam.service /etc/systemd/system/tg-antispam.service

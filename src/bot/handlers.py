@@ -2,20 +2,30 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from aiogram import F, Router
+from aiogram.enums import ChatMemberStatus
 from aiogram.filters import Command
 from aiogram.types import ChatMemberUpdated, ChatPermissions, Message
-from aiogram.enums import ChatMemberStatus
 
-from src.config import load_settings
-from src.storage.db import add_violation, del_captcha, get_captcha, save_recent_message, set_captcha, set_mute_level
-from src.filters.captcha import check_answer, generate_captcha
 from src.ai.vega_client import ai_is_spam
+from src.config import load_settings
+from src.filters.captcha import check_answer, generate_captcha
+from src.storage.db import (
+    add_violation,
+    del_captcha,
+    get_captcha,
+    save_recent_message,
+    set_captcha,
+    set_mute_level,
+)
 
 router = Router()
 log = logging.getLogger("tg-antispam")
+
+# для отмены таймаутов капчи при успешной проверке
+_captcha_tasks: dict[tuple[int, int], asyncio.Task] = {}
 
 
 def is_group_chat(m: Message) -> bool:
@@ -28,7 +38,6 @@ def is_allowed_chat(chat_id: int, username: str | None) -> bool:
     if not lst:
         return True
     chat_str = str(chat_id)
-    # нормализуем: wpexpro == @wpexpro == @WPEXPRO
     norm = [c.strip().lower().lstrip("@") for c in lst]
     uname = (username or "").strip().lower().lstrip("@")
     return chat_str in lst or chat_str in norm or uname in norm
@@ -60,6 +69,7 @@ CATEGORY_EMOJI = {
     "ok": "✅",
 }
 
+
 def _notify_text(user_mention: str, category: str, reason: str) -> str:
     emoji = CATEGORY_EMOJI.get(category.lower(), "🚫")
     cat_ru = {
@@ -81,10 +91,9 @@ def _notify_text(user_mention: str, category: str, reason: str) -> str:
     return f"🗑️ Сообщение от {user_mention} удалено\n{emoji} Причина: {cat_ru} — {reason}"
 
 
-async def _notify_and_cleanup(bot, chat_id: int, text: str, delay: int = 30):
+async def _notify_and_cleanup(bot, chat_id: int, text: str, delay: int = 30) -> None:
     try:
         msg = await bot.send_message(chat_id, text)
-        # удаляем уведомление через 30с чтобы не засорять чат
         await asyncio.sleep(delay)
         try:
             await msg.delete()
@@ -94,8 +103,103 @@ async def _notify_and_cleanup(bot, chat_id: int, text: str, delay: int = 30):
         log.warning("notify failed: %s", e)
 
 
+def _cancel_captcha_task(chat_id: int, user_id: int) -> None:
+    task = _captcha_tasks.pop((chat_id, user_id), None)
+    if task and not task.done():
+        task.cancel()
+
+
+async def _apply_mute_escalation(bot, chat_id: int, user_id: int, category: str, reason: str, full_name: str) -> None:
+    try:
+        c24, c3d, level = await add_violation(chat_id, user_id, category, reason)
+        uname = f"<a href='tg://user?id={user_id}'>{full_name}</a>"
+        if level == 0 and c24 >= 2:
+            until = datetime.now(UTC) + timedelta(days=1)
+            await bot.restrict_chat_member(
+                chat_id, user_id, permissions=ChatPermissions(can_send_messages=False), until_date=until
+            )
+            await set_mute_level(chat_id, user_id, 1, int(until.timestamp()))
+            asyncio.create_task(_notify_and_cleanup(bot, chat_id, f"🔇 {uname} мьют на 1 день — 2 нарушения за 24ч", delay=60))
+            log.info("mute 1d user=%s chat=%s c24=%s c3d=%s", user_id, chat_id, c24, c3d)
+        elif level == 1 and c3d >= 4:
+            until = datetime.now(UTC) + timedelta(days=7)
+            await bot.restrict_chat_member(
+                chat_id, user_id, permissions=ChatPermissions(can_send_messages=False), until_date=until
+            )
+            await set_mute_level(chat_id, user_id, 2, int(until.timestamp()))
+            asyncio.create_task(_notify_and_cleanup(bot, chat_id, f"🔇 {uname} мьют на 7 дней — повторные нарушения за 3 дня", delay=60))
+            log.info("mute 7d user=%s chat=%s c24=%s c3d=%s", user_id, chat_id, c24, c3d)
+        elif level >= 2 and c3d >= 6:
+            await bot.restrict_chat_member(chat_id, user_id, permissions=ChatPermissions(can_send_messages=False))
+            await set_mute_level(chat_id, user_id, 3, None)
+            asyncio.create_task(_notify_and_cleanup(bot, chat_id, f"⛔ {uname} постоянный мьют — многократные нарушения", delay=60))
+            log.info("mute forever user=%s chat=%s c24=%s c3d=%s", user_id, chat_id, c24, c3d)
+    except Exception as e:
+        log.warning("mute escalation failed: %s", e)
+
+
+async def _handle_spam(m: Message, result: dict) -> None:
+    s = load_settings()
+    if not s.delete_spam or not is_group_chat(m):
+        return
+    try:
+        await m.delete()
+    except Exception as e:
+        log.warning("delete failed: %s", e)
+    try:
+        uname = f"<a href='tg://user?id={m.from_user.id}'>{m.from_user.full_name}</a>" if m.from_user else "пользователя"
+        reason = result.get("reason") or result.get("category") or "спам"
+        cat = result.get("category") or "other"
+        asyncio.create_task(_notify_and_cleanup(m.bot, m.chat.id, _notify_text(uname, cat, reason)))
+        if m.from_user:
+            await _apply_mute_escalation(m.bot, m.chat.id, m.from_user.id, cat, reason, m.from_user.full_name)
+    except Exception:
+        pass
+
+
+def _captcha_message(mention: str, cap: dict) -> str:
+    return f"{mention} напишите пожалуйста ответ на вопрос числом, сколько будет {cap['a']}+{cap['b']} ({cap['text'].split('(')[-1]}"
+
+
+async def _start_captcha(bot, chat_id: int, user_id: int, full_name: str) -> None:
+    s = load_settings()
+    cap = generate_captcha(s.default_language)
+    await set_captcha(chat_id, user_id, cap["answer"], cap["trap_answer"])
+    mention = f"<a href='tg://user?id={user_id}'>{full_name}</a>"
+    try:
+        until = datetime.now(UTC) + timedelta(seconds=s.captcha_timeout_sec + 60)
+        await bot.restrict_chat_member(chat_id, user_id, permissions=ChatPermissions(can_send_messages=False), until_date=until)
+    except Exception as e:
+        log.warning("restrict failed: %s", e)
+    msg = await bot.send_message(chat_id, _captcha_message(mention, cap))
+
+    async def timeout_kick() -> None:
+        try:
+            await asyncio.sleep(s.captcha_timeout_sec)
+            st = await get_captcha(chat_id, user_id)
+            if st:
+                try:
+                    if s.mute_on_captcha_fail:
+                        await bot.ban_chat_member(chat_id, user_id)
+                        await bot.unban_chat_member(chat_id, user_id)
+                    await bot.send_message(chat_id, f"⛔ {mention} не прошел проверку и удален (таймаут капчи).")
+                    try:
+                        await msg.delete()
+                    except Exception:
+                        pass
+                finally:
+                    await del_captcha(chat_id, user_id)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            _captcha_tasks.pop((chat_id, user_id), None)
+
+    _cancel_captcha_task(chat_id, user_id)
+    _captcha_tasks[(chat_id, user_id)] = asyncio.create_task(timeout_kick())
+
+
 @router.message(Command("start"))
-async def cmd_start(m: Message):
+async def cmd_start(m: Message) -> None:
     await m.answer(
         "Привет! Я антиспам-бот.\n"
         "Добавь меня в группу/канал и выдай права админа (удаление сообщений + бан).\n"
@@ -110,7 +214,7 @@ async def cmd_start(m: Message):
 
 
 @router.message(Command("status"))
-async def cmd_status(m: Message):
+async def cmd_status(m: Message) -> None:
     if m.chat.type != "private" or not m.from_user or not is_admin(m.from_user.id):
         return
     s = load_settings()
@@ -125,60 +229,21 @@ async def cmd_status(m: Message):
 
 
 @router.chat_member()
-async def on_chat_member(event: ChatMemberUpdated):
+async def on_chat_member(event: ChatMemberUpdated) -> None:
     try:
         if event.new_chat_member.status in (ChatMemberStatus.MEMBER, ChatMemberStatus.RESTRICTED):
             user = event.new_chat_member.user
-            if user.is_bot:
-                return
-            if is_whitelisted(user.id):
+            if user.is_bot or is_whitelisted(user.id):
                 return
             if not is_allowed_chat(event.chat.id, getattr(event.chat, "username", None)):
                 return
-            s = load_settings()
-            try:
-                until = datetime.now(timezone.utc) + timedelta(seconds=s.captcha_timeout_sec + 60)
-                await event.bot.restrict_chat_member(
-                    event.chat.id,
-                    user.id,
-                    permissions=ChatPermissions(can_send_messages=False),
-                    until_date=until,
-                )
-            except Exception as e:
-                log.warning("restrict failed: %s", e)
-            cap = generate_captcha(s.default_language)
-            await set_captcha(event.chat.id, user.id, cap["answer"], cap["trap_answer"])
-            mention = f"<a href='tg://user?id={user.id}'>{user.full_name}</a>"
-            msg = await event.bot.send_message(
-                event.chat.id,
-                f"{mention} напишите пожалуйста ответ на вопрос числом, сколько будет {cap['a']}+{cap['b']} ({cap['text'].split('(')[-1]}",
-            )
-
-            async def timeout_kick():
-                await asyncio.sleep(s.captcha_timeout_sec)
-                st = await get_captcha(event.chat.id, user.id)
-                if st:
-                    try:
-                        if s.mute_on_captcha_fail:
-                            await event.bot.ban_chat_member(event.chat.id, user.id)
-                            await event.bot.unban_chat_member(event.chat.id, user.id)
-                        await event.bot.send_message(
-                            event.chat.id, f"⛔ {mention} не прошел проверку и удален (таймаут капчи)."
-                        )
-                        try:
-                            await msg.delete()
-                        except Exception:
-                            pass
-                    finally:
-                        await del_captcha(event.chat.id, user.id)
-
-            asyncio.create_task(timeout_kick())
+            await _start_captcha(event.bot, event.chat.id, user.id, user.full_name)
     except Exception as e:
         log.exception("chat_member error: %s", e)
 
 
 @router.message(F.new_chat_members)
-async def on_new_members(m: Message):
+async def on_new_members(m: Message) -> None:
     s = load_settings()
     for u in m.new_chat_members or []:
         if u.is_bot or is_whitelisted(u.id):
@@ -188,18 +253,14 @@ async def on_new_members(m: Message):
         cap = generate_captcha(s.default_language)
         await set_captcha(m.chat.id, u.id, cap["answer"], cap["trap_answer"])
         mention = f"<a href='tg://user?id={u.id}'>{u.full_name}</a>"
-        await m.answer(
-            f"{mention} напишите пожалуйста ответ на вопрос числом, сколько будет {cap['a']}+{cap['b']} ({cap['text'].split('(')[-1]}"
-        )
+        await m.answer(_captcha_message(mention, cap))
 
 
 @router.message(F.text)
 @router.channel_post(F.text)
-async def on_text(m: Message):
+async def on_text(m: Message) -> None:
     try:
-        await save_recent_message(
-            m.chat.id, m.message_id, m.from_user.id if m.from_user else 0, m.text or m.caption or ""
-        )
+        await save_recent_message(m.chat.id, m.message_id, m.from_user.id if m.from_user else 0, m.text or m.caption or "")
     except Exception as e:
         log.warning("save_recent failed: %s", e)
 
@@ -210,6 +271,7 @@ async def on_text(m: Message):
             s = load_settings()
             mention = f"<a href='tg://user?id={m.from_user.id}'>{m.from_user.full_name}</a>"
             if res == "ok":
+                _cancel_captcha_task(m.chat.id, m.from_user.id)
                 await del_captcha(m.chat.id, m.from_user.id)
                 try:
                     await m.bot.restrict_chat_member(
@@ -227,6 +289,7 @@ async def on_text(m: Message):
                 await m.answer(f"✅ {mention} проверка пройдена, добро пожаловать!")
                 return
             elif res == "trap":
+                _cancel_captcha_task(m.chat.id, m.from_user.id)
                 await del_captcha(m.chat.id, m.from_user.id)
                 try:
                     if s.mute_on_captcha_fail:
@@ -251,7 +314,12 @@ async def on_text(m: Message):
         return
 
     if is_group_chat(m) and not is_allowed_chat(m.chat.id, getattr(m.chat, "username", None)):
-        log.info("skip not allowed chat=%s username=%s allowed=%s", m.chat.id, getattr(m.chat, "username", None), load_settings().allowed_chat_list)
+        log.info(
+            "skip not allowed chat=%s username=%s allowed=%s",
+            m.chat.id,
+            getattr(m.chat, "username", None),
+            load_settings().allowed_chat_list,
+        )
         return
 
     text = (m.text or m.caption or "").strip()
@@ -259,9 +327,16 @@ async def on_text(m: Message):
         log.info("skip empty text chat=%s", m.chat.id)
         return
 
-    # диагностический лог — видно в journalctl
     s_dbg = load_settings()
-    log.info("check msg chat=%s type=%s user=%s vega_key=%s model=%s text=%.100s", m.chat.id, m.chat.type, getattr(m.from_user, "id", 0), "set" if s_dbg.vega_api_key else "EMPTY", s_dbg.vega_model, text)
+    log.info(
+        "check msg chat=%s type=%s user=%s vega_key=%s model=%s text=%.100s",
+        m.chat.id,
+        m.chat.type,
+        getattr(m.from_user, "id", 0),
+        "set" if s_dbg.vega_api_key else "EMPTY",
+        s_dbg.vega_model,
+        text,
+    )
 
     result = await ai_is_spam(text, None)
     if result.get("spam"):
@@ -275,84 +350,28 @@ async def on_text(m: Message):
             result.get("via"),
             text,
         )
-        if s.delete_spam and is_group_chat(m):
-            try:
-                await m.delete()
-            except Exception as e:
-                log.warning("delete failed: %s", e)
-            # уведомление в чат с причиной (с эмодзи, авто-удаление через 30с)
-            try:
-                uname = f"<a href='tg://user?id={m.from_user.id}'>{m.from_user.full_name}</a>" if m.from_user else "пользователя"
-                reason = result.get("reason") or result.get("category") or "спам"
-                cat = result.get("category") or "other"
-                asyncio.create_task(_notify_and_cleanup(m.bot, m.chat.id, _notify_text(uname, cat, reason)))
-            except Exception:
-                pass
-            # прогрессивный мьют: 2×/24ч→1д, +2×/3д→7д, +ещё→перманент
-            if m.from_user:
-                try:
-                    c24, c3d, level = await add_violation(m.chat.id, m.from_user.id, cat, reason)
-                    uname2 = f"<a href='tg://user?id={m.from_user.id}'>{m.from_user.full_name}</a>"
-                    if level == 0 and c24 >= 2:
-                        until = datetime.now(timezone.utc) + timedelta(days=1)
-                        await m.bot.restrict_chat_member(m.chat.id, m.from_user.id, permissions=ChatPermissions(can_send_messages=False), until_date=until)
-                        await set_mute_level(m.chat.id, m.from_user.id, 1, int(until.timestamp()))
-                        asyncio.create_task(_notify_and_cleanup(m.bot, m.chat.id, f"🔇 {uname2} мьют на 1 день — 2 нарушения за 24ч", delay=60))
-                        log.info("mute 1d user=%s chat=%s c24=%s c3d=%s", m.from_user.id, m.chat.id, c24, c3d)
-                    elif level == 1 and c3d >= 4:
-                        until = datetime.now(timezone.utc) + timedelta(days=7)
-                        await m.bot.restrict_chat_member(m.chat.id, m.from_user.id, permissions=ChatPermissions(can_send_messages=False), until_date=until)
-                        await set_mute_level(m.chat.id, m.from_user.id, 2, int(until.timestamp()))
-                        asyncio.create_task(_notify_and_cleanup(m.bot, m.chat.id, f"🔇 {uname2} мьют на 7 дней — повторные нарушения за 3 дня", delay=60))
-                        log.info("mute 7d user=%s chat=%s c24=%s c3d=%s", m.from_user.id, m.chat.id, c24, c3d)
-                    elif level >= 2 and c3d >= 6:
-                        await m.bot.restrict_chat_member(m.chat.id, m.from_user.id, permissions=ChatPermissions(can_send_messages=False))
-                        await set_mute_level(m.chat.id, m.from_user.id, 3, None)
-                        asyncio.create_task(_notify_and_cleanup(m.bot, m.chat.id, f"⛔ {uname2} постоянный мьют — многократные нарушения", delay=60))
-                        log.info("mute forever user=%s chat=%s c24=%s c3d=%s", m.from_user.id, m.chat.id, c24, c3d)
-                except Exception as e:
-                    log.warning("mute escalation failed: %s", e)
-        return
+        await _handle_spam(m, result)
 
 
 @router.message(F.photo | F.document | F.video)
 @router.channel_post(F.photo | F.document | F.video)
-async def on_media(m: Message):
+async def on_media(m: Message) -> None:
     try:
-        await save_recent_message(
-            m.chat.id, m.message_id, m.from_user.id if m.from_user else 0, m.caption or "[media]"
-        )
+        await save_recent_message(m.chat.id, m.message_id, m.from_user.id if m.from_user else 0, m.caption or "[media]")
     except Exception:
         pass
     if m.from_user and is_whitelisted(m.from_user.id):
         return
     if m.caption:
         result = await ai_is_spam(m.caption)
-        if result.get("spam") and load_settings().delete_spam and is_group_chat(m):
-            try:
-                await m.delete()
-            except Exception:
-                pass
-            try:
-                uname = f"<a href='tg://user?id={m.from_user.id}'>{m.from_user.full_name}</a>" if m.from_user else "пользователя"
-                reason = result.get("reason") or result.get("category") or "спам"
-                cat = result.get("category") or "other"
-                asyncio.create_task(_notify_and_cleanup(m.bot, m.chat.id, _notify_text(uname, cat, reason)))
-                if m.from_user:
-                    c24, c3d, level = await add_violation(m.chat.id, m.from_user.id, cat, reason)
-                    if level == 0 and c24 >= 2:
-                        until = datetime.now(timezone.utc) + timedelta(days=1)
-                        await m.bot.restrict_chat_member(m.chat.id, m.from_user.id, permissions=ChatPermissions(can_send_messages=False), until_date=until)
-                        await set_mute_level(m.chat.id, m.from_user.id, 1, int(until.timestamp()))
-                        asyncio.create_task(_notify_and_cleanup(m.bot, m.chat.id, f"🔇 {uname} мьют на 1 день — 2 нарушения за 24ч", delay=60))
-                    elif level == 1 and c3d >= 4:
-                        until = datetime.now(timezone.utc) + timedelta(days=7)
-                        await m.bot.restrict_chat_member(m.chat.id, m.from_user.id, permissions=ChatPermissions(can_send_messages=False), until_date=until)
-                        await set_mute_level(m.chat.id, m.from_user.id, 2, int(until.timestamp()))
-                        asyncio.create_task(_notify_and_cleanup(m.bot, m.chat.id, f"🔇 {uname} мьют на 7 дней — повторные нарушения", delay=60))
-                    elif level >= 2 and c3d >= 6:
-                        await m.bot.restrict_chat_member(m.chat.id, m.from_user.id, permissions=ChatPermissions(can_send_messages=False))
-                        await set_mute_level(m.chat.id, m.from_user.id, 3, None)
-                        asyncio.create_task(_notify_and_cleanup(m.bot, m.chat.id, f"⛔ {uname} постоянный мьют", delay=60))
-            except Exception:
-                pass
+        if result.get("spam"):
+            log.info(
+                "spam detected media chat=%s user=%s reason=%s cat=%s via=%s caption=%.120s",
+                m.chat.id,
+                getattr(m.from_user, "id", 0),
+                result.get("reason"),
+                result.get("category"),
+                result.get("via"),
+                m.caption,
+            )
+            await _handle_spam(m, result)

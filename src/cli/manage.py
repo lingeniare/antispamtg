@@ -1,6 +1,10 @@
 from __future__ import annotations
-import argparse, sys, yaml
+
+import argparse
+import sys
 from pathlib import Path
+
+import yaml
 
 CFG = Path("config/config.yaml")
 EXAMPLE = Path("config/config.example.yaml")

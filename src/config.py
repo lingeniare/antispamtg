@@ -1,12 +1,20 @@
 from __future__ import annotations
-import os
-import yaml
+
+import time
 from pathlib import Path
+
+import yaml
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
-from pydantic import Field
 
 CONFIG_PATH = Path("config/config.yaml")
 ENV_PATH = Path(".env")
+
+# кэш настроек и промпта
+_settings_cache: tuple[float, Settings] | None = None
+_prompt_cache: tuple[float, str, str] | None = None  # (ts, path, content)
+_CACHE_TTL = 60  # сек
+
 
 class Settings(BaseSettings):
     bot_token: str = Field(default="", alias="BOT_TOKEN")
@@ -24,6 +32,13 @@ class Settings(BaseSettings):
     ban_on_repeat_spam: bool = Field(default=False, alias="BAN_ON_REPEAT_SPAM")
 
     model_config = {"env_file": ".env", "extra": "ignore", "populate_by_name": True}
+
+    @field_validator("bot_token")
+    @classmethod
+    def _validate_token(cls, v: str) -> str:
+        if v and ":" not in v:
+            raise ValueError("BOT_TOKEN должен быть вида 123456:ABC...")
+        return v
 
     @property
     def allowed_chat_list(self) -> list[str]:
@@ -53,46 +68,103 @@ class Settings(BaseSettings):
                     continue
         return out
 
+
 def load_yaml_config() -> dict:
     if CONFIG_PATH.exists():
-        return yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
+        try:
+            return yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
+        except Exception:
+            return {}
     ex = Path("config/config.example.yaml")
     if ex.exists():
-        return yaml.safe_load(ex.read_text(encoding="utf-8")) or {}
+        try:
+            return yaml.safe_load(ex.read_text(encoding="utf-8")) or {}
+        except Exception:
+            return {}
     return {}
 
-def load_settings() -> Settings:
-    # yaml приоритетнее .env если задан
-    y = load_yaml_config()
-    # пробрасываем yaml в env-подобные ключи
+
+def _merge_yaml_to_kwargs(y: dict) -> dict:
+    """Маппит yaml-ключи в kwargs для Settings без мутации os.environ."""
+    out: dict = {}
     mapping = {
+        "bot_token": "bot_token",
+        "vega_api_key": "vega_api_key",
+        "vega_base_url": "vega_base_url",
+        "vega_model": "vega_model",
+        "default_language": "default_language",
+        "filter_prompt_path": "filter_prompt_path",
+    }
+    for k, sk in mapping.items():
+        if y.get(k) not in (None, ""):
+            out[sk] = str(y[k])
+    # списковые поля
+    if y.get("allowed_chats"):
+        v = ",".join(str(x) for x in y["allowed_chats"])
+        out.setdefault("allowed_chats", v)
+    if y.get("whitelist_users"):
+        v = ",".join(str(x) for x in y["whitelist_users"])
+        out.setdefault("whitelist_users", v)
+    if y.get("admin_users"):
+        v = ",".join(str(x) for x in y["admin_users"])
+        out.setdefault("admin_user_ids", v)
+    # bool/int из yaml
+    for k in ("captcha_timeout_sec", "delete_spam", "mute_on_captcha_fail", "ban_on_repeat_spam"):
+        if k in y and y[k] is not None:
+            out[k] = y[k]
+    return out
+
+
+def load_settings(*, use_cache: bool = True) -> Settings:
+    global _settings_cache
+    now = time.monotonic()
+    if use_cache and _settings_cache and (now - _settings_cache[0] < _CACHE_TTL):
+        return _settings_cache[1]
+
+    y = load_yaml_config()
+    yaml_kwargs = _merge_yaml_to_kwargs(y)
+    # yaml не перетирает явно заданные env-переменные — pydantic сам приоритизирует env,
+    # но мы передаём yaml только если env пустой для этих полей
+    # чтобы не мутировать os.environ, фильтруем: если env уже есть, убираем yaml-значение
+    import os as _os
+
+    env_alias = {
         "bot_token": "BOT_TOKEN",
         "vega_api_key": "VEGA_API_KEY",
         "vega_base_url": "VEGA_BASE_URL",
         "vega_model": "VEGA_MODEL",
         "default_language": "DEFAULT_LANGUAGE",
         "filter_prompt_path": "FILTER_PROMPT_PATH",
+        "allowed_chats": "ALLOWED_CHATS",
+        "whitelist_users": "WHITELIST_USERS",
+        "admin_user_ids": "ADMIN_USER_IDS",
     }
-    for k, envk in mapping.items():
-        if y.get(k) and not os.getenv(envk):
-            os.environ[envk] = str(y[k])
-    if y.get("allowed_chats"):
-        v = ",".join(str(x) for x in y["allowed_chats"])
-        if not os.getenv("ALLOWED_CHATS"):
-            os.environ["ALLOWED_CHATS"] = v
-    if y.get("whitelist_users"):
-        v = ",".join(str(x) for x in y["whitelist_users"])
-        if not os.getenv("WHITELIST_USERS"):
-            os.environ["WHITELIST_USERS"] = v
-    if y.get("admin_users"):
-        v = ",".join(str(x) for x in y["admin_users"])
-        if not os.getenv("ADMIN_USER_IDS"):
-            os.environ["ADMIN_USER_IDS"] = v
-    return Settings()
+    for k, envk in env_alias.items():
+        if k in yaml_kwargs and _os.getenv(envk):
+            del yaml_kwargs[k]
 
-def filter_prompt() -> str:
-    s = load_settings()
+    s = Settings(**yaml_kwargs)
+    _settings_cache = (now, s)
+    return s
+
+
+def clear_settings_cache() -> None:
+    global _settings_cache, _prompt_cache
+    _settings_cache = None
+    _prompt_cache = None
+
+
+def filter_prompt(*, use_cache: bool = True) -> str:
+    global _prompt_cache
+    s = load_settings(use_cache=use_cache)
     p = Path(s.filter_prompt_path)
+    now = time.monotonic()
+    if use_cache and _prompt_cache and _prompt_cache[1] == str(p) and (now - _prompt_cache[0] < _CACHE_TTL):
+        return _prompt_cache[2]
+    text = ""
     if p.exists():
-        return p.read_text(encoding="utf-8")
-    return Path("config/filter_prompt.txt").read_text(encoding="utf-8") if Path("config/filter_prompt.txt").exists() else ""
+        text = p.read_text(encoding="utf-8")
+    elif Path("config/filter_prompt.txt").exists():
+        text = Path("config/filter_prompt.txt").read_text(encoding="utf-8")
+    _prompt_cache = (now, str(p), text)
+    return text

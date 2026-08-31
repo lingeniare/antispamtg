@@ -1,7 +1,7 @@
 bot_token: "PUT_TOKEN_HERE"
 vega_api_key: "PUT_VEGA_KEY_HERE"
 vega_base_url: "https://api.vega.chat/v1"
-vega_model: "gpt-4o-mini"
+vega_model: "z-ai/glm-5.3-flash"
 allowed_chats: []  # [-100123..., "@channel"]
 whitelist_users: [] # [123456]
 admin_users: []

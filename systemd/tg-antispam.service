@@ -9,7 +9,7 @@ EnvironmentFile=/opt/tg-antispam/.env
 ExecStart=/opt/tg-antispam/.venv/bin/python -m src.bot.bot
 Restart=always
 RestartSec=5
-User=root
+User=tg-antispam
 
 [Install]
 WantedBy=multi-user.target
