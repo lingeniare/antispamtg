@@ -20,7 +20,7 @@ Python 3.10+, aiogram 3.x, aiosqlite, openai (для api.vega.chat OpenAI-сов
    - `WHITELIST_USERS`
    - `DEFAULT_LANGUAGE` (ru/en/tr/uk/kz...)
    - `VEGA_API_KEY`
-   - `VEGA_MODEL` (список с api.vega.chat/models, default gpt-4o-mini)
+   - `VEGA_MODEL` (список с api.vega.chat/models, default z-ai/glm-5.3-flash)
 5. Создает `/opt/tg-antispam`, `.venv`, `pip install -e .`, `.env` + `config/config.yaml` (если уже есть — не перетирать), `data/bot.db`, `systemd` сервис `tg-antispam`.
 6. Печатает финальную инструкцию: добавить бота в группу/канал админом + ссылка на tg.vega.chat + команды CLI + логи.
 

@@ -124,7 +124,7 @@ sudo bash install.sh
 
 Скрипт:
 1. Покажет инструкцию: `@BotFather → /newbot → токен` + `api.vega.chat` (VEGA, по умолчанию) или `openrouter.ai → Keys` (OpenRouter) — разница только в `base URL`
-2. Спросит `Y/N`, затем: `BOT_TOKEN`, **выбор провайдера** `1) VEGA (api.vega.chat/v1, по умолчанию)` / `2) OpenRouter (openrouter.ai/api/v1)` → `API_KEY` (VEGA или OpenRouter соответственно), `ALLOWED_CHATS` (ID `-100...` или `@username`, пусто = все), `WHITELIST`, `язык` (ru/en/tr…), `модель` (default `qwen/qwen3-8b-flash` / `gpt-4o-mini`)
+2. Спросит `Y/N`, затем: `BOT_TOKEN`, **выбор провайдера** `1) VEGA (api.vega.chat/v1, по умолчанию)` / `2) OpenRouter (openrouter.ai/api/v1)` → `API_KEY` (VEGA или OpenRouter соответственно), `ALLOWED_CHATS` (ID `-100...` или `@username`, пусто = все), `WHITELIST`, `язык` (ru/en/tr…), `модель` (default `z-ai/glm-5.3-flash`)
 3. Установит в `/opt/tg-antispam` (исходник остаётся в текущей папке), создаст `.venv`, `systemd` сервис `tg-antispam` (в `.env`/`config.yaml` сохранит `VEGA_BASE_URL` — `https://api.vega.chat/v1` или `https://openrouter.ai/api/v1`)
 
 **После установки:**

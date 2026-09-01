@@ -101,8 +101,8 @@ read -p "  Группы/каналы для фильтрации (через з�
 read -p "  Белый список user_id (через запятую): " WHITELIST
 read -p "  Основной язык (ru/en/tr/uk, default ru): " LANG
 LANG=${LANG:-ru}
-read -p "  Модель (default gpt-4o-mini): " MODEL
-MODEL=${MODEL:-gpt-4o-mini}
+read -p "  Модель (default z-ai/glm-5.3-flash): " MODEL
+MODEL=${MODEL:-z-ai/glm-5.3-flash}
 
 # сохраняем .env и config.yaml (не перетираем при обновлении если уже есть)
 if [ ! -f ".env" ]; then

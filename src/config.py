@@ -29,7 +29,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("VEGA_BASE_URL", "OPENROUTER_BASE_URL", "AI_BASE_URL"),
     )
     vega_model: str = Field(
-        default="gpt-4o-mini", validation_alias=AliasChoices("VEGA_MODEL", "OPENROUTER_MODEL", "AI_MODEL")
+        default="z-ai/glm-5.3-flash", validation_alias=AliasChoices("VEGA_MODEL", "OPENROUTER_MODEL", "AI_MODEL")
     )
     allowed_chats: str = Field(default="", alias="ALLOWED_CHATS")  # csv
     whitelist_users: str = Field(default="", alias="WHITELIST_USERS")
