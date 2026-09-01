@@ -51,6 +51,10 @@ def is_admin(user_id: int) -> bool:
     return user_id in load_settings().admin_list
 
 
+def _is_forward(m: Message) -> bool:
+    return bool(getattr(m, "forward_origin", None) or getattr(m, "forward_from", None) or getattr(m, "forward_from_chat", None))
+
+
 CATEGORY_EMOJI = {
     "link": "🔗",
     "ads": "📢",
@@ -327,18 +331,20 @@ async def on_text(m: Message) -> None:
         log.info("skip empty text chat=%s", m.chat.id)
         return
 
+    is_fwd = _is_forward(m)
     s_dbg = load_settings()
     log.info(
-        "check msg chat=%s type=%s user=%s vega_key=%s model=%s text=%.100s",
+        "check msg chat=%s type=%s user=%s fwd=%s vega_key=%s model=%s text=%.100s",
         m.chat.id,
         m.chat.type,
         getattr(m.from_user, "id", 0),
+        is_fwd,
         "set" if s_dbg.vega_api_key else "EMPTY",
         s_dbg.vega_model,
         text,
     )
 
-    result = await ai_is_spam(text, None)
+    result = await ai_is_spam(text, None, is_forward=is_fwd)
     if result.get("spam"):
         s = load_settings()
         log.info(
@@ -363,15 +369,38 @@ async def on_media(m: Message) -> None:
     if m.from_user and is_whitelisted(m.from_user.id):
         return
     if m.caption:
-        result = await ai_is_spam(m.caption)
+        is_fwd = _is_forward(m)
+        result = await ai_is_spam(m.caption, is_forward=is_fwd)
         if result.get("spam"):
             log.info(
-                "spam detected media chat=%s user=%s reason=%s cat=%s via=%s caption=%.120s",
+                "spam detected media chat=%s user=%s fwd=%s reason=%s cat=%s via=%s caption=%.120s",
                 m.chat.id,
                 getattr(m.from_user, "id", 0),
+                is_fwd,
                 result.get("reason"),
                 result.get("category"),
                 result.get("via"),
                 m.caption,
             )
             await _handle_spam(m, result)
+
+
+# fallback для пересланных сообщений — ловит форварды, которые не покрыл F.text (например, без текста)
+@router.message(F.forward_origin)
+@router.channel_post(F.forward_origin)
+async def on_forward_fallback(m: Message) -> None:
+    if m.chat.type == "private":
+        return
+    if m.text:
+        return  # уже обработан в on_text, избегаем двойного LLM-вызова (зависимость от порядка роутов)
+    text = (m.text or m.caption or "").strip()
+    if not text:
+        return
+    if m.from_user and is_whitelisted(m.from_user.id):
+        return
+    if is_group_chat(m) and not is_allowed_chat(m.chat.id, getattr(m.chat, "username", None)):
+        return
+    result = await ai_is_spam(text, is_forward=True)
+    if result.get("spam"):
+        log.info("spam forward fallback chat=%s user=%s reason=%s cat=%s text=%.120s", m.chat.id, getattr(m.from_user, "id", 0), result.get("reason"), result.get("category"), text)
+        await _handle_spam(m, result)

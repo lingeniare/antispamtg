@@ -7,8 +7,11 @@ import yaml
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings
 
-CONFIG_PATH = Path("config/config.yaml")
-ENV_PATH = Path(".env")
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+CONFIG_PATH = _PROJECT_ROOT / "config/config.yaml"
+ENV_PATH = _PROJECT_ROOT / ".env"
+_CONFIG_EXAMPLE = _PROJECT_ROOT / "config/config.example.yaml"
+_DEFAULT_PROMPT = _PROJECT_ROOT / "config/filter_prompt.txt"
 
 # кэш настроек и промпта
 _settings_cache: tuple[float, Settings] | None = None
@@ -38,7 +41,7 @@ class Settings(BaseSettings):
     mute_on_captcha_fail: bool = Field(default=True, alias="MUTE_ON_CAPTCHA_FAIL")
     ban_on_repeat_spam: bool = Field(default=False, alias="BAN_ON_REPEAT_SPAM")
 
-    model_config = {"env_file": ".env", "extra": "ignore", "populate_by_name": True}
+    model_config = {"env_file": str(_PROJECT_ROOT / ".env"), "extra": "ignore", "populate_by_name": True}
 
     @field_validator("bot_token")
     @classmethod
@@ -80,12 +83,6 @@ def load_yaml_config() -> dict:
     if CONFIG_PATH.exists():
         try:
             return yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
-        except Exception:
-            return {}
-    ex = Path("config/config.example.yaml")
-    if ex.exists():
-        try:
-            return yaml.safe_load(ex.read_text(encoding="utf-8")) or {}
         except Exception:
             return {}
     return {}
@@ -171,7 +168,7 @@ def filter_prompt(*, use_cache: bool = True) -> str:
     text = ""
     if p.exists():
         text = p.read_text(encoding="utf-8")
-    elif Path("config/filter_prompt.txt").exists():
-        text = Path("config/filter_prompt.txt").read_text(encoding="utf-8")
+    elif _DEFAULT_PROMPT.exists():
+        text = _DEFAULT_PROMPT.read_text(encoding="utf-8")
     _prompt_cache = (now, str(p), text)
     return text

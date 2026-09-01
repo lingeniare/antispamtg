@@ -39,21 +39,22 @@ def _get_client(api_key: str, base_url: str) -> AsyncOpenAI:
     return _client
 
 
-def heuristic_spam(text: str) -> tuple[bool, str] | None:
+def heuristic_spam(text: str, is_forward: bool = False) -> tuple[bool, str] | None:
     """Быстрые эвристики до вызова LLM. Возвращает (is_spam, reason) или None если неясно."""
     if not text:
         return None
     has_link = bool(_link_re.search(text))
     if has_link and (_casino_re.search(text) or _sex_re.search(text) or _drugs_re.search(text)):
         return True, "heuristic: link + banned topic"
+    _ = is_forward  # зарезервирован для будущих строгих правил; сейчас LLM решает по [FORWARDED]
     return None
 
 
-async def ai_is_spam(text: str, image_url: str | None = None) -> dict:
+async def ai_is_spam(text: str, image_url: str | None = None, is_forward: bool = False) -> dict:
     """
     Возвращает {"spam":bool,"reason":str,"category":str,"via":"heuristic|llm"}
     """
-    h = heuristic_spam(text or "")
+    h = heuristic_spam(text or "", is_forward=is_forward)
     if h is not None:
         is_spam, reason = h
         return {"spam": is_spam, "reason": reason, "category": "heuristic", "via": "heuristic"}
@@ -61,16 +62,18 @@ async def ai_is_spam(text: str, image_url: str | None = None) -> dict:
     s = load_settings()
     if not s.vega_api_key:
         has_link = bool(_link_re.search(text or ""))
+        # без ключа: форвард с ссылкой тоже считаем спамом
         return {
             "spam": has_link,
-            "reason": "no api key, link heuristic",
+            "reason": "no api key, link heuristic" + (" + forward" if is_forward and has_link else ""),
             "category": "link" if has_link else "ok",
             "via": "heuristic",
         }
 
     prompt = filter_prompt() or SYSTEM_FALLBACK
     client = _get_client(s.vega_api_key, s.vega_base_url)
-    content: list[dict] = [{"type": "text", "text": f"Сообщение:\n{text[:3000]}\n\nВерни только JSON."}]
+    prefix = "[FORWARDED] " if is_forward else ""
+    content: list[dict] = [{"type": "text", "text": f"Сообщение:\n{prefix}{text[:3000]}\n\nВерни только JSON."}]
     if image_url:
         content.append({"type": "image_url", "image_url": {"url": image_url}})
 
@@ -82,7 +85,7 @@ async def ai_is_spam(text: str, image_url: str | None = None) -> dict:
             max_tokens=200,
         )
         raw = resp.choices[0].message.content or "{}"
-        m = re.search(r"\{.*\}", raw, re.S)
+        m = re.search(r"\{.*?\}", raw, re.S)
         j = json.loads(m.group(0)) if m else {}
         spam = bool(j.get("spam"))
         return {

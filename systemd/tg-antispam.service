@@ -1,5 +1,5 @@
 [Unit]
-Description=TG AntiSpam AI Bot (api.vega.chat)
+Description=Telegram AI AntiSpam (api.vega.chat)
 After=network.target
 
 [Service]

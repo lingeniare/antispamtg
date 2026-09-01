@@ -6,7 +6,7 @@ from pathlib import Path
 
 import aiosqlite
 
-DB_PATH = Path("data/bot.db")
+DB_PATH = Path(__file__).resolve().parents[2] / "data/bot.db"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS recent_messages (
@@ -140,6 +140,8 @@ async def add_violation(chat_id: int, user_id: int, category: str = "", reason: 
             "INSERT INTO violations(chat_id,user_id,ts,category,reason) VALUES(?,?,?,?,?)",
             (chat_id, user_id, ts, category, reason),
         )
+        # TTL-чистка: удаляем старше 7 дней, чтобы БД не раздувалась
+        await db.execute("DELETE FROM violations WHERE ts < ?", (ts - 7 * 86400,))
         await db.commit()
         async with db.execute(
             "SELECT COUNT(*) FROM violations WHERE chat_id=? AND user_id=? AND ts > ?", (chat_id, user_id, ts - 86400)

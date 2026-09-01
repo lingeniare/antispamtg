@@ -11,6 +11,7 @@ Set spam=true if ANY of these is present IN ANY LANGUAGE (translate meaning inte
 5. PROFANITY: strong profanity in ANY language — Russian (хуй, пизда, блядь, ебать, сука, долбоеб, нахуй), English (fuck, shit, bitch, ass, dick, cunt), Turkish (amk, aq, sik, orospu), Ukrainian (хуй, пизда, блядь), Arabic, Hindi etc. — including disguised forms: x*y, f**k, х*й, п*зда, fck, transliteration, leet (4=а, 3=е), spaces (х у й)
 6. INSULT/HATE/THREAT: personal insults, hate speech, harassment, bullying, threats, even without classic profanity (e.g., "ты дебил", "you idiot", "aptal", "idiot")
 7. FLOOD/SPAM: meaningless repetition, flood (aaaa, hahaha spam), begging, scam warm-up, off-topic promo
+8. FORWARD/REPOST: forwarded message (marked as [FORWARDED]) with ANY promo/ad/invite/link/call to action ("подпишись", "перейди", "заходи", "join", "subscribe", @username, t.me, domain) OR banned topic from 1-6 = spam true. Forward with phishing/fake giveaway/crypto/sex/adult is ALWAYS spam. Pure forward without promo and without violations (e.g., news quote, meme without link) = ok
 
 RULES:
 - Profanity/insult/hate in ANY language even without link = spam true (category profanity/insult/hate)

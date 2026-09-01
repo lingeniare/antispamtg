@@ -11,10 +11,10 @@ from src.bot.handlers import router
 from src.config import load_settings
 from src.storage.db import init_db
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("tg-antispam")
 
 async def main():
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     s = load_settings()
     if not s.bot_token:
         raise SystemExit("BOT_TOKEN не задан. Запустите install.sh или задайте .env / config/config.yaml")

@@ -40,7 +40,7 @@ def check_answer(user_text: str, expected: int, trap: int) -> str:
         return "wrong"
     try:
         n = int(m.group(0))
-    except:
+    except (ValueError, TypeError):
         return "wrong"
     if n == expected:
         return "ok"

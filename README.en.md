@@ -1,4 +1,94 @@
-# TG AntiSpam AI Bot 🤖🛡️
+<p align="center">
+  <a href="README.md">Русский</a> &nbsp;|&nbsp; <b>English</b>
+</p>
+
+<p align="center">
+  <img src="cover.webp" alt="Telegram AI AntiSpam — spam protection" width="100%" />
+</p>
+
+<h1 align="center">Telegram AI AntiSpam 🤖🛡️</h1>
+
+<p align="center">
+  Self-hosted AI bot to protect Telegram groups, supergroups and channels from spam in any language<br/>
+  Every message via <b>AI</b> + heuristics · mute instead of kick · AI-trap captcha
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="License: MIT"/></a>
+  <a href="https://ubuntu.com/"><img src="https://img.shields.io/badge/Platform-Ubuntu%2022.04%20%2F%2024.04-E95420.svg?style=flat-square&logo=ubuntu&logoColor=white" alt="Platform"/></a>
+  <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB.svg?style=flat-square&logo=python&logoColor=white" alt="Python"/>
+  <img src="https://img.shields.io/badge/aiogram-3.x-2CA5E0.svg?style=flat-square&logo=telegram&logoColor=white" alt="aiogram"/>
+  <a href="https://api.vega.chat"><img src="https://img.shields.io/badge/VEGA_API-OpenAI_compatible-7A5CFA.svg?style=flat-square" alt="VEGA API"/></a>
+</p>
+
+<p align="center"><b>Project Sponsors</b></p>
+<table>
+<tr>
+<td align="center" valign="top" width="50%">
+<h3>💬 VEGA Chat</h3>
+The most versatile AI chat in the world
+with free <b>Autopilot</b> — all AI models,
+image / video / music & website generation. Personalized for you.
+
+<a href="https://vega.chat"><img src="https://img.shields.io/badge/Explore_vega.chat-7A5CFA?style=for-the-badge&logo=sparkles&logoColor=white" alt="Explore vega.chat"/></a>
+</td>
+<td align="center" valign="top" width="50%">
+<h3>🔌 VEGA API</h3>
+All <b>OpenRouter</b> endpoints in Russia + catalog of
+<b>MCP, SKILL, apps</b> and <b>VEGA SKILL API</b>
+to build your own AI apps without limits.
+
+<a href="https://api.vega.chat"><img src="https://img.shields.io/badge/Explore_API-00B37E?style=for-the-badge&logo=rocket&logoColor=white" alt="Explore API"/></a>
+</td>
+</tr>
+</table>
+
+---
+
+<table>
+<tr>
+<td align="center" valign="top" width="33%">
+
+### 🚀 One-click install
+`curl | bash` wizard — ready in a minute, `systemd` with auto-restart
+
+</td>
+<td align="center" valign="top" width="33%">
+
+### 🔇 Keeps subscribers
+Never kicks — mutes violators to preserve member count, progressive penalties
+
+</td>
+<td align="center" valign="top" width="33%">
+
+### 🧠 Smart cleanup
+AI + heuristics remove spam, ads and illegal content in any language
+
+</td>
+</tr>
+<tr>
+<td align="center" valign="top" width="33%">
+
+### 🔌 Two AI providers
+[VEGA API](https://api.vega.chat) and [OpenRouter](https://openrouter.ai) — switch with one line in `.env`
+
+</td>
+<td align="center" valign="top" width="33%">
+
+### 🔒 Your bot, your data
+Self-hosted on your server — no third party has access to your channel
+
+</td>
+<td align="center" valign="top" width="33%">
+
+### 💚 100% Open Source
+MIT licensed, no hidden dependencies or paid subscriptions
+
+</td>
+</tr>
+</table>
+
+---
 
 Self-hosted AI bot to protect Telegram groups, supergroups and channels (incl. comments) from spam in any language.
 
@@ -65,9 +155,19 @@ sudo bash uninstall.sh --keep-config
 
 AI provider: `VEGA_BASE_URL` — `https://api.vega.chat/v1` (default) or `https://openrouter.ai/api/v1` (OpenRouter). `VEGA_API_KEY` holds key for either provider (also supports aliases `OPENROUTER_API_KEY`/`AI_API_KEY`). Switch without reinstall: `nano .env` → `VEGA_BASE_URL` + `VEGA_API_KEY` → `sudo systemctl restart tg-antispam`.
 
-## License
-MIT — PRs welcome!
+---
 
-## Docs
-- [Spec](docs/TZ.md)
-- Vega API: https://api.vega.chat
+<p align="center">
+  <b>☕ Support the project</b><br/>
+  <a href="https://buymeacoffee.com/vegaspace" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50" width="210"/></a>
+</p>
+
+<p align="center">
+  <a href="docs/TZ.md">Spec</a> •
+  <a href="https://api.vega.chat">Vega API</a> •
+  <a href="LICENSE">MIT License</a>
+</p>
+
+<p align="center">
+  <sub>© 2026 <a href="https://getmyai.io">getmyai.io</a></sub>
+</p>
