@@ -20,7 +20,10 @@ echo "=============================================="
 echo ""
 echo "Инструкция перед установкой:"
 echo " 1) Создайте бота: Telegram -> @BotFather -> /newbot -> придумайте name_bot (напр. antispamtg_bot) -> скопируйте токен"
-echo " 2) Получите API key: https://api.vega.chat -> регистрация -> Dashboard -> скопируйте API key"
+echo " 2) Получите API key:"
+echo "    - VEGA (по умолчанию, дешевле): https://api.vega.chat -> регистрация -> Dashboard -> скопируйте API key"
+echo "    - OpenRouter (альтернатива): https://openrouter.ai -> Keys -> Create API Key"
+echo "    Разница только в base URL, API совместимы."
 echo ""
 read -p "Продолжить установку? (Y/N): " cont
 if [[ "$cont" != "Y" && "$cont" != "y" ]]; then echo "Остановлено."; exit 0; fi
@@ -81,12 +84,24 @@ sudo chown -R $(whoami):$(whoami) .venv 2>/dev/null || true
 echo ""
 echo "[4/6] Настройка бота (можно пропустить Enter — потом через CLI):"
 read -p "  BOT_TOKEN (от @BotFather): " BOT_TOKEN
-read -p "  VEGA_API_KEY (api.vega.chat): " VEGA_KEY
+echo ""
+echo "  Выберите AI провайдера:"
+echo "    1) VEGA API — https://api.vega.chat/v1 (по умолчанию, дешевле)"
+echo "    2) OpenRouter — https://openrouter.ai/api/v1"
+read -p "  Провайдер [1/2, default 1]: " AI_PROVIDER
+AI_PROVIDER=${AI_PROVIDER:-1}
+if [[ "$AI_PROVIDER" == "2" ]]; then
+  VEGA_BASE_URL="https://openrouter.ai/api/v1"
+  read -p "  OPENROUTER_API_KEY (openrouter.ai): " VEGA_KEY
+else
+  VEGA_BASE_URL="https://api.vega.chat/v1"
+  read -p "  VEGA_API_KEY (api.vega.chat): " VEGA_KEY
+fi
 read -p "  Группы/каналы для фильтрации (через запятую, ID или @username, пусто=все): " ALLOWED
 read -p "  Белый список user_id (через запятую): " WHITELIST
 read -p "  Основной язык (ru/en/tr/uk, default ru): " LANG
 LANG=${LANG:-ru}
-read -p "  Модель Vega (default gpt-4o-mini): " MODEL
+read -p "  Модель (default gpt-4o-mini): " MODEL
 MODEL=${MODEL:-gpt-4o-mini}
 
 # сохраняем .env и config.yaml (не перетираем при обновлении если уже есть)
@@ -94,7 +109,7 @@ if [ ! -f ".env" ]; then
   cat > .env <<EOF
 BOT_TOKEN=$BOT_TOKEN
 VEGA_API_KEY=$VEGA_KEY
-VEGA_BASE_URL=https://api.vega.chat/v1
+VEGA_BASE_URL=$VEGA_BASE_URL
 VEGA_MODEL=$MODEL
 ALLOWED_CHATS=$ALLOWED
 WHITELIST_USERS=$WHITELIST
@@ -103,7 +118,7 @@ FILTER_PROMPT_PATH=config/filter_prompt.txt
 CAPTCHA_TIMEOUT_SEC=120
 DELETE_SPAM=true
 EOF
-  echo "  -> .env создан"
+  echo "  -> .env создан (провайдер: $VEGA_BASE_URL)"
 else
   echo "  -> .env уже существует, не перетерт (обнови вручную при нужде)"
 fi
@@ -113,7 +128,7 @@ if [ ! -f "config/config.yaml" ]; then
   cat > config/config.yaml <<EOF
 bot_token: "$BOT_TOKEN"
 vega_api_key: "$VEGA_KEY"
-vega_base_url: "https://api.vega.chat/v1"
+vega_base_url: "$VEGA_BASE_URL"
 vega_model: "$MODEL"
 allowed_chats: [$(echo $ALLOWED | sed 's/,/, /g')]
 whitelist_users: [$(echo $WHITELIST | sed 's/,/, /g')]

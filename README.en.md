@@ -31,9 +31,9 @@ curl -fsSL https://tg.vega.chat/install.sh | sudo bash
 sudo bash install.sh
 ```
 
-1. Get `@BotFather → /newbot → token` + `api.vega.chat → Dashboard → API key`
-2. Installer asks `Y/N`, then `BOT_TOKEN`, `ALLOWED_CHATS` (IDs `-100...` or `@username`, empty = all), `WHITELIST`, `language`, `VEGA_API_KEY`, `model`
-3. Installs to `/opt/tg-antispam` (source stays), creates `.venv` + `systemd` service
+1. Get `@BotFather → /newbot → token` + `api.vega.chat → Dashboard → API key` (VEGA, default) or `openrouter.ai → Keys` (OpenRouter) — difference is only `base URL`
+2. Installer asks `Y/N`, then `BOT_TOKEN`, **AI provider** `1) VEGA (api.vega.chat/v1, default)` / `2) OpenRouter (openrouter.ai/api/v1)` → `API_KEY` (VEGA or OpenRouter), `ALLOWED_CHATS` (IDs `-100...` or `@username`, empty = all), `WHITELIST`, `language`, `model`
+3. Installs to `/opt/tg-antispam` (source stays), creates `.venv` + `systemd` service (saves `VEGA_BASE_URL` — `https://api.vega.chat/v1` or `https://openrouter.ai/api/v1`)
 
 **After install:**
 - Add bot to group/channel → **Make admin** (delete + ban). For **channel** also add to **discussion group** (Channel → Settings → Discussion → Group) — otherwise comments are invisible. Admin there too.
@@ -62,6 +62,8 @@ sudo bash uninstall.sh --keep-config
 
 ## Config
 `.env` + `config/config.yaml` (yaml wins) · `config/filter_prompt.txt` · `data/bot.db`
+
+AI provider: `VEGA_BASE_URL` — `https://api.vega.chat/v1` (default) or `https://openrouter.ai/api/v1` (OpenRouter). `VEGA_API_KEY` holds key for either provider (also supports aliases `OPENROUTER_API_KEY`/`AI_API_KEY`). Switch without reinstall: `nano .env` → `VEGA_BASE_URL` + `VEGA_API_KEY` → `sudo systemctl restart tg-antispam`.
 
 ## License
 MIT — PRs welcome!

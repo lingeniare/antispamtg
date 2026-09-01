@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 
 import yaml
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings
 
 CONFIG_PATH = Path("config/config.yaml")
@@ -18,9 +18,16 @@ _CACHE_TTL = 60  # сек
 
 class Settings(BaseSettings):
     bot_token: str = Field(default="", alias="BOT_TOKEN")
-    vega_api_key: str = Field(default="", alias="VEGA_API_KEY")
-    vega_base_url: str = Field(default="https://api.vega.chat/v1", alias="VEGA_BASE_URL")
-    vega_model: str = Field(default="gpt-4o-mini", alias="VEGA_MODEL")
+    vega_api_key: str = Field(
+        default="", validation_alias=AliasChoices("VEGA_API_KEY", "OPENROUTER_API_KEY", "AI_API_KEY")
+    )
+    vega_base_url: str = Field(
+        default="https://api.vega.chat/v1",
+        validation_alias=AliasChoices("VEGA_BASE_URL", "OPENROUTER_BASE_URL", "AI_BASE_URL"),
+    )
+    vega_model: str = Field(
+        default="gpt-4o-mini", validation_alias=AliasChoices("VEGA_MODEL", "OPENROUTER_MODEL", "AI_MODEL")
+    )
     allowed_chats: str = Field(default="", alias="ALLOWED_CHATS")  # csv
     whitelist_users: str = Field(default="", alias="WHITELIST_USERS")
     default_language: str = Field(default="ru", alias="DEFAULT_LANGUAGE")
@@ -129,18 +136,18 @@ def load_settings(*, use_cache: bool = True) -> Settings:
     import os as _os
 
     env_alias = {
-        "bot_token": "BOT_TOKEN",
-        "vega_api_key": "VEGA_API_KEY",
-        "vega_base_url": "VEGA_BASE_URL",
-        "vega_model": "VEGA_MODEL",
-        "default_language": "DEFAULT_LANGUAGE",
-        "filter_prompt_path": "FILTER_PROMPT_PATH",
-        "allowed_chats": "ALLOWED_CHATS",
-        "whitelist_users": "WHITELIST_USERS",
-        "admin_user_ids": "ADMIN_USER_IDS",
+        "bot_token": ("BOT_TOKEN",),
+        "vega_api_key": ("VEGA_API_KEY", "OPENROUTER_API_KEY", "AI_API_KEY"),
+        "vega_base_url": ("VEGA_BASE_URL", "OPENROUTER_BASE_URL", "AI_BASE_URL"),
+        "vega_model": ("VEGA_MODEL", "OPENROUTER_MODEL", "AI_MODEL"),
+        "default_language": ("DEFAULT_LANGUAGE",),
+        "filter_prompt_path": ("FILTER_PROMPT_PATH",),
+        "allowed_chats": ("ALLOWED_CHATS",),
+        "whitelist_users": ("WHITELIST_USERS",),
+        "admin_user_ids": ("ADMIN_USER_IDS",),
     }
-    for k, envk in env_alias.items():
-        if k in yaml_kwargs and _os.getenv(envk):
+    for k, envks in env_alias.items():
+        if k in yaml_kwargs and any(_os.getenv(e) for e in envks):
             del yaml_kwargs[k]
 
     s = Settings(**yaml_kwargs)

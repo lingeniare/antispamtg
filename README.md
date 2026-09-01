@@ -39,9 +39,9 @@ sudo bash install.sh
 ```
 
 Скрипт:
-1. Покажет инструкцию: `@BotFather → /newbot → токен` + `api.vega.chat → Dashboard → API key`
-2. Спросит `Y/N`, затем: `BOT_TOKEN`, `ALLOWED_CHATS` (ID `-100...` или `@username`, пусто = все), `WHITELIST`, `язык` (ru/en/tr…), `VEGA_API_KEY`, `модель` (default `qwen/qwen3-8b-flash`)
-3. Установит в `/opt/tg-antispam` (исходник остаётся в текущей папке), создаст `.venv`, `systemd` сервис `tg-antispam`
+1. Покажет инструкцию: `@BotFather → /newbot → токен` + `api.vega.chat` (VEGA, по умолчанию) или `openrouter.ai → Keys` (OpenRouter) — разница только в `base URL`
+2. Спросит `Y/N`, затем: `BOT_TOKEN`, **выбор провайдера** `1) VEGA (api.vega.chat/v1, по умолчанию)` / `2) OpenRouter (openrouter.ai/api/v1)` → `API_KEY` (VEGA или OpenRouter соответственно), `ALLOWED_CHATS` (ID `-100...` или `@username`, пусто = все), `WHITELIST`, `язык` (ru/en/tr…), `модель` (default `qwen/qwen3-8b-flash` / `gpt-4o-mini`)
+3. Установит в `/opt/tg-antispam` (исходник остаётся в текущей папке), создаст `.venv`, `systemd` сервис `tg-antispam` (в `.env`/`config.yaml` сохранит `VEGA_BASE_URL` — `https://api.vega.chat/v1` или `https://openrouter.ai/api/v1`)
 
 **После установки:**
 - Добавь бота в группу/канал → **Сделать админом** (удаление сообщений + бан). Для **канала** добавь ещё и в **группу комментариев** (Канал → Настройки → Обсуждение → Группа), иначе комментарии не увидит — там тоже админ.
@@ -70,6 +70,8 @@ sudo bash uninstall.sh --keep-config # с бэкапом в /tmp/tg-antispam-bac
 
 ### Конфигурация
 `.env` + `config/config.yaml` (yaml приоритетнее) · `config/filter_prompt.txt` · `data/bot.db`
+
+Провайдер AI: `VEGA_BASE_URL` — `https://api.vega.chat/v1` (по дефолту) или `https://openrouter.ai/api/v1` (OpenRouter). `VEGA_API_KEY` хранит ключ любого провайдера (также поддерживаются алиасы `OPENROUTER_API_KEY`/`AI_API_KEY`). Переключить без переустановки: `nano .env` → `VEGA_BASE_URL` + `VEGA_API_KEY` → `sudo systemctl restart tg-antispam`.
 
 ### Как это работает
 `new_chat_members`/`chat_member` → капча с ловушкой → мьют 120с → проверка → `on_text`/`channel_post`/`on_media` → `save_recent_message` → whitelist/allowed → эвристика `link+banned` → `api.vega.chat/v1/chat/completions` → `JSON {spam,reason,category}` → `delete()` + `🗑️ Причина: ...` (авто-удаление через 30с) → `violations` → мьют эскалация.
@@ -118,9 +120,9 @@ curl -fsSL https://tg.vega.chat/install.sh | sudo bash
 sudo bash install.sh
 ```
 
-1. Get `@BotFather → /newbot → token` + `api.vega.chat → Dashboard → API key`
-2. Installer asks `Y/N`, then `BOT_TOKEN`, `ALLOWED_CHATS` (IDs `-100...` or `@username`, empty = all), `WHITELIST`, `language`, `VEGA_API_KEY`, `model`
-3. Installs to `/opt/tg-antispam` (source stays), creates `.venv` + `systemd` service
+1. Get `@BotFather → /newbot → token` + `api.vega.chat → Dashboard → API key` (VEGA, default) or `openrouter.ai → Keys` (OpenRouter) — difference is only `base URL`
+2. Installer asks `Y/N`, then `BOT_TOKEN`, **AI provider** `1) VEGA (api.vega.chat/v1, default)` / `2) OpenRouter (openrouter.ai/api/v1)` → `API_KEY` (VEGA or OpenRouter), `ALLOWED_CHATS` (IDs `-100...` or `@username`, empty = all), `WHITELIST`, `language`, `model`
+3. Installs to `/opt/tg-antispam` (source stays), creates `.venv` + `systemd` service (saves `VEGA_BASE_URL` — `https://api.vega.chat/v1` or `https://openrouter.ai/api/v1`)
 
 **After install:**
 - Add bot to group/channel → **Make admin** (delete + ban). For **channel** also add to **discussion group** (Channel → Settings → Discussion → Group) — otherwise comments are invisible. Admin there too.
@@ -148,6 +150,8 @@ sudo bash uninstall.sh --keep-config
 
 ### Config
 `.env` + `config/config.yaml` (yaml wins) · `config/filter_prompt.txt` · `data/bot.db`
+
+AI provider: `VEGA_BASE_URL` — `https://api.vega.chat/v1` (default) or `https://openrouter.ai/api/v1` (OpenRouter). `VEGA_API_KEY` holds key for either provider (also supports aliases `OPENROUTER_API_KEY`/`AI_API_KEY`). Switch without reinstall: `nano .env` → `VEGA_BASE_URL` + `VEGA_API_KEY` → `sudo systemctl restart tg-antispam`.
 
 ### License
 MIT — see `LICENSE` (add if needed). PRs welcome!
