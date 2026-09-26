@@ -12,10 +12,12 @@ CONFIG_PATH = _PROJECT_ROOT / "config/config.yaml"
 ENV_PATH = _PROJECT_ROOT / ".env"
 _CONFIG_EXAMPLE = _PROJECT_ROOT / "config/config.example.yaml"
 _DEFAULT_PROMPT = _PROJECT_ROOT / "config/filter_prompt.txt"
+_DEFAULT_CHAT_PROMPT = _PROJECT_ROOT / "config/chat_prompt.txt"
 
 # кэш настроек и промпта
 _settings_cache: tuple[float, Settings] | None = None
 _prompt_cache: tuple[float, str, str] | None = None  # (ts, path, content)
+_chat_prompt_cache: tuple[float, str, str] | None = None
 _CACHE_TTL = 60  # сек
 
 
@@ -55,6 +57,16 @@ class Settings(BaseSettings):
     # сообщений в RATE_WINDOW_SEC до вердикта "flood" без LLM
     rate_limit_count: int = Field(default=6, alias="RATE_LIMIT_COUNT")
     rate_window_sec: int = Field(default=10, alias="RATE_WINDOW_SEC")
+    # разговорная личность ВЕГА: отвечает на @mention, ответы ей, имя в тексте, ЛС (админы/whitelist)
+    chat_enabled: bool = Field(default=True, alias="CHAT_ENABLED")
+    vega_chat_model: str = Field(default="", alias="VEGA_CHAT_MODEL")  # пусто = vega_model
+    chat_prompt_path: str = Field(default="config/chat_prompt.txt", alias="CHAT_PROMPT_PATH")
+    # веб-поиск в ответах (OpenRouter plugins id=web; работает если провайдер поддерживает)
+    chat_web_search: bool = Field(default=False, alias="CHAT_WEB_SEARCH")
+    chat_max_tokens: int = Field(default=500, alias="CHAT_MAX_TOKENS")
+    # % чистых сообщений, которые ВЕГА увидит БЕЗ триггера и решит сама — встрять или молчать.
+    # 0 = только по триггерам. Каждое ambient-сообщение = 1 LLM-вызов (цена свободы воли).
+    chat_ambient_pct: int = Field(default=0, alias="CHAT_AMBIENT_PCT")
 
     model_config = {"env_file": str(_PROJECT_ROOT / ".env"), "extra": "ignore", "populate_by_name": True}
 
@@ -121,6 +133,12 @@ def _merge_yaml_to_kwargs(y: dict) -> dict:
         "bio_scan": "bio_scan",
         "rate_limit_count": "rate_limit_count",
         "rate_window_sec": "rate_window_sec",
+        "chat_enabled": "chat_enabled",
+        "vega_chat_model": "vega_chat_model",
+        "chat_prompt_path": "chat_prompt_path",
+        "chat_web_search": "chat_web_search",
+        "chat_max_tokens": "chat_max_tokens",
+        "chat_ambient_pct": "chat_ambient_pct",
     }
     for k, sk in mapping.items():
         if y.get(k) not in (None, ""):
@@ -144,6 +162,10 @@ def _merge_yaml_to_kwargs(y: dict) -> dict:
         "probation_msgs",
         "rate_limit_count",
         "rate_window_sec",
+        "chat_enabled",
+        "chat_web_search",
+        "chat_max_tokens",
+        "chat_ambient_pct",
     ):
         if k in y and y[k] is not None:
             out[k] = y[k]
@@ -181,6 +203,12 @@ def load_settings(*, use_cache: bool = True) -> Settings:
         "bio_scan": ("BIO_SCAN",),
         "rate_limit_count": ("RATE_LIMIT_COUNT",),
         "rate_window_sec": ("RATE_WINDOW_SEC",),
+        "chat_enabled": ("CHAT_ENABLED",),
+        "vega_chat_model": ("VEGA_CHAT_MODEL",),
+        "chat_prompt_path": ("CHAT_PROMPT_PATH",),
+        "chat_web_search": ("CHAT_WEB_SEARCH",),
+        "chat_max_tokens": ("CHAT_MAX_TOKENS",),
+        "chat_ambient_pct": ("CHAT_AMBIENT_PCT",),
     }
     for k, envks in env_alias.items():
         if k in yaml_kwargs and any(_os.getenv(e) for e in envks):
@@ -192,9 +220,10 @@ def load_settings(*, use_cache: bool = True) -> Settings:
 
 
 def clear_settings_cache() -> None:
-    global _settings_cache, _prompt_cache
+    global _settings_cache, _prompt_cache, _chat_prompt_cache
     _settings_cache = None
     _prompt_cache = None
+    _chat_prompt_cache = None
 
 
 def filter_prompt(*, use_cache: bool = True) -> str:
@@ -210,4 +239,21 @@ def filter_prompt(*, use_cache: bool = True) -> str:
     elif _DEFAULT_PROMPT.exists():
         text = _DEFAULT_PROMPT.read_text(encoding="utf-8")
     _prompt_cache = (now, str(p), text)
+    return text
+
+
+def chat_prompt(*, use_cache: bool = True) -> str:
+    """Промпт личности ВЕГА — config/chat_prompt.txt, кэш 60с."""
+    global _chat_prompt_cache
+    s = load_settings(use_cache=use_cache)
+    p = Path(s.chat_prompt_path)
+    now = time.monotonic()
+    if use_cache and _chat_prompt_cache and _chat_prompt_cache[1] == str(p) and (now - _chat_prompt_cache[0] < _CACHE_TTL):
+        return _chat_prompt_cache[2]
+    text = ""
+    if p.exists():
+        text = p.read_text(encoding="utf-8")
+    elif _DEFAULT_CHAT_PROMPT.exists():
+        text = _DEFAULT_CHAT_PROMPT.read_text(encoding="utf-8")
+    _chat_prompt_cache = (now, str(p), text)
     return text

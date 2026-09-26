@@ -24,3 +24,10 @@ bio_scan: true
 ban_on_repeat_spam: false
 rate_limit_count: 6
 rate_window_sec: 10
+# личность ВЕГА: @mention / ответ ей / «вега» в тексте; ЛС — админы и whitelist
+chat_enabled: true
+vega_chat_model: ""      # пусто = vega_model; суффикс :online включает веб-поиск
+chat_prompt_path: "config/chat_prompt.txt"
+chat_web_search: false
+chat_max_tokens: 500
+chat_ambient_pct: 0     # % чистых сообщений без триггера, которые ВЕГА увидит и решит — ответить или нет

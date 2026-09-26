@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
+import random
+import re
 import time
 from collections import deque
 from datetime import UTC, datetime, timedelta
@@ -12,8 +15,8 @@ from aiogram.filters import Command
 from aiogram.types import ChatMemberUpdated, ChatPermissions, Message, User
 
 from src.ai.media import resolve_image
-from src.ai.vega_client import ai_is_spam, strict_fallback
-from src.config import load_settings
+from src.ai.vega_client import ai_chat_reply, ai_is_spam, strict_fallback
+from src.config import chat_prompt, load_settings
 from src.filters.content import (
     extract_hidden_urls,
     has_banned_topic,
@@ -47,6 +50,23 @@ _notify_ts: dict[int, deque[float]] = {}  # chat_id -> ts отправленны
 _suppressed: dict[int, int] = {}  # chat_id -> сколько уведомлений подавлено
 _summary_task: dict[int, asyncio.Task] = {}
 _PROFILE_SCANNED: set[tuple[int, int]] = set()  # био сканим один раз за процесс
+_bot_me_cache: tuple[float, object | None] = (0, None)
+_NAME_RE = re.compile(r"\b(вега|vega|вегочка|вегушка)\b", re.I)
+
+
+async def _bot_me(bot) -> object | None:
+    """Кэш get_me — нужен для детекта @упоминания бота."""
+    global _bot_me_cache
+    now = time.monotonic()
+    if _bot_me_cache[1] is not None and now - _bot_me_cache[0] < 3600:
+        return _bot_me_cache[1]
+    try:
+        me = await bot.get_me()
+        _bot_me_cache = (now, me)
+        return me
+    except Exception as e:
+        log.warning("get_me failed: %s", e)
+        return None
 
 
 def is_group_chat(m: Message) -> bool:
@@ -424,9 +444,108 @@ async def _moderate(m: Message) -> dict:
     return result
 
 
+async def _chat_triggered(m: Message) -> bool:
+    """Когда ВЕГА может захотеть ответить: reply на неё, @упоминание, имя в тексте.
+    Само решение — за моделью (она может промолчать через [SILENT])."""
+    text = (m.text or m.caption or "").strip()
+    if not text:
+        return False
+    rep = getattr(m, "reply_to_message", None)
+    if rep and rep.from_user and rep.from_user.id == getattr(m.bot, "id", None):
+        return True
+    me = await _bot_me(m.bot)
+    uname = getattr(me, "username", None) if me else None
+    if uname and f"@{uname}".lower() in text.lower():
+        return True
+    return bool(_NAME_RE.search(text))
+
+
+async def _chat_reply(m: Message, force: bool = False) -> None:
+    """Диалог личности ВЕГА. force=True — в ЛС от админа/whitelist отвечаем всегда
+    (ну, если сама модель не промолчит)."""
+    s = load_settings()
+    if not s.chat_enabled:
+        return
+    uid = m.from_user.id if m.from_user else 0
+    if uid and _is_rate_limited(m.chat.id, uid, s.rate_limit_count, s.rate_window_sec):
+        return
+    if not force and not await _chat_triggered(m):
+        # свобода воли: с шансом chat_ambient_pct ВЕГА сама посмотрит сообщение
+        # и решит — встрять или промолчать ([SILENT])
+        if s.chat_ambient_pct <= 0 or random.random() * 100 >= s.chat_ambient_pct:
+            return
+
+    context = None
+    try:
+        recent = await get_recent_messages(m.chat.id)
+        context = [r["text"] for r in reversed(recent) if r["message_id"] != m.message_id and r["text"]]
+    except Exception:
+        pass
+
+    text = (m.text or m.caption or "").strip()
+    # reply-контекст: на что отвечают
+    rep = getattr(m, "reply_to_message", None)
+    rep_text = ""
+    if rep:
+        rt = (rep.text or rep.caption or "").strip()
+        if rt:
+            rep_text = f"\n(Ответ на сообщение: {rt[:500]})"
+
+    content: list[dict] = []
+    parts = []
+    if context:
+        parts.append("Последние сообщения чата:\n" + "\n".join(f"- {c[:200]}" for c in context[:3]))
+    parts.append(f"Сообщение от {m.from_user.full_name if m.from_user else 'юзера'}:{rep_text}\n{text}")
+    content.append({"type": "text", "text": "\n\n".join(parts)})
+
+    # картинка в диалоге: «вега, что тут?» + фото → тот же vision-резолвер
+    if m.photo or m.sticker or m.animation or m.video or m.video_note or m.document:
+        image_url, _ = await resolve_image(m.bot, m)
+        if image_url:
+            content.append({"type": "image_url", "image_url": {"url": image_url}})
+
+    prompt = chat_prompt()
+    if not prompt:
+        return
+    model = s.vega_chat_model or s.vega_model
+    out = await ai_chat_reply(prompt, content, model, s.chat_max_tokens, s.chat_web_search)
+    if out:
+        log.info("vega chat reply chat=%s len=%s", m.chat.id, len(out))
+        try:
+            # escape: у бота parse_mode=HTML, дерзкая ВЕГА может выдать «<» и уронить отправку
+            await m.reply(html.escape(out[:4000]))
+        except Exception as e:
+            log.warning("chat reply failed: %s", e)
+    else:
+        log.info("vega chat silent/empty chat=%s", m.chat.id)
+
+
+_PRIVATE_REFUSAL = (
+    "В личке я общаюсь только со своими создателями — @ingeniare и @SmirnNadya. "
+    "Хочешь поговорить — зови меня в группе."
+)
+
+
+async def _handle_private(m: Message) -> None:
+    """ЛС: диалог только с создателями (ADMIN_USER_IDS). Чужим — один вежливый
+    отказ в характере ВЕГИ (без LLM-вызова), со троттлингом от флуда."""
+    if not m.from_user:
+        return
+    if is_admin(m.from_user.id):
+        await _chat_reply(m, force=True)
+        return
+    if _is_rate_limited(m.chat.id, m.from_user.id, 2, 300):
+        return
+    try:
+        await m.answer(_PRIVATE_REFUSAL)
+    except Exception as e:
+        log.warning("private refusal failed: %s", e)
+
+
 async def _process(m: Message) -> None:
     """Общий вход для новых и отредактированных сообщений."""
     if m.chat.type == "private":
+        await _handle_private(m)
         return
     if not is_group_chat(m):
         return
@@ -439,10 +558,13 @@ async def _process(m: Message) -> None:
     except Exception as e:
         log.warning("save_recent failed: %s", e)
 
-    if m.from_user:
-        if is_whitelisted(m.from_user.id) or is_admin(m.from_user.id):
-            return
-    if await _is_chat_admin(m):
+    # свои (whitelist/админы бота/админы чата) модерацию пропускаем,
+    # но разговаривать с ВЕГАй они могут — иначе админ не услышит ответа никогда
+    privileged = bool(m.from_user) and (
+        is_whitelisted(m.from_user.id) or is_admin(m.from_user.id)
+    )
+    if privileged or await _is_chat_admin(m):
+        await _chat_reply(m)
         return
 
     result = await _moderate(m)
@@ -459,17 +581,19 @@ async def _process(m: Message) -> None:
         await _handle_spam(m, result)
     elif m.from_user:
         await bump_member_msgs(m.chat.id, m.from_user.id)
+        # чистое сообщение → ВЕГА может ответить, если к ней обратились
+        await _chat_reply(m)
 
 
 @router.message(Command("start"))
 async def cmd_start(m: Message) -> None:
     await m.answer(
-        "Привет! Я антиспам-бот.\n"
+        "Привет! Я ВЕГА — антиспам-бот и немного личность. Обращайся — позови «Вега» или ответь на моё сообщение.\n"
         "Добавь меня в группу/канал и выдай права админа (удаление сообщений + бан).\n"
         "⚠️ Для КАНАЛА: добавь меня ещё и в группу комментариев (Канал → Настройки → Обсуждение → Группа), иначе не увижу комментарии. Там тоже дай админа.\n"
         "Команды в ЛС (только для админов):\n"
         "/status — статус\n"
-        "/add_chat <id|@username> — добавить чат\n"
+        "/add_chat &lt;id|@username&gt; — добавить чат\n"
         "/whitelist <user_id> — в белый список\n"
         "Настройки хранятся в config/config.yaml и data/bot.db — не удаляй их при обновлении.\n"
         "Больше возможностей: https://tg.vega.chat"
@@ -489,6 +613,7 @@ async def cmd_status(m: Message) -> None:
         f"Whitelist: {s.whitelist_list}\n"
         f"Mute policy: {s.mute_policy}\n"
         f"Probation: {s.probation_hours}h/{s.probation_msgs}msg bio_scan={s.bio_scan}\n"
+        f"Chat: <code>{s.vega_chat_model or s.vega_model}</code> enabled={s.chat_enabled} web={s.chat_web_search}\n"
         f"Vega: {'ok' if s.vega_api_key else 'NOT SET'}\n"
         f"Сервис: tg.vega.chat — защита без сервера"
     )

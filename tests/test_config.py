@@ -13,7 +13,11 @@ def test_admin_parse():
     assert s.admin_list == [1,2]
 
 
-def test_new_defaults():
+def test_new_defaults(tmp_path, monkeypatch):
+    # отрезаем реальный .env проекта (env_file — абсолютный путь), проверяем дефолты
+    monkeypatch.setattr(
+        Settings, "model_config", {**Settings.model_config, "env_file": str(tmp_path / "none.env")}
+    )
     s = Settings()
     assert s.mute_policy == "permanent"
     assert s.vision_mode == "suspect"

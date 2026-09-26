@@ -128,3 +128,51 @@ async def ai_is_spam(
     except Exception as e:
         log.warning("Vega LLM error model=%s: %s", model or s.vega_model, e)
         return {"spam": False, "reason": f"llm error: {e}", "category": "error", "via": "llm", "error": True}
+
+
+async def ai_chat_reply(
+    prompt: str,
+    content: list[dict],
+    model: str,
+    max_tokens: int,
+    web_search: bool = False,
+) -> str | None:
+    """Ответ личности ВЕГА. web_search=True → суффикс :online к модели
+    (OpenRouter web-search, api.vega.chat — тот же прокси).
+    None при ошибке или если модель ответила [SILENT]."""
+    s = load_settings()
+    if not s.vega_api_key:
+        return None
+    client = _get_client(s.vega_api_key, s.vega_base_url)
+    use_model = model + ":online" if web_search and not model.endswith(":online") else model
+    msgs = [{"role": "system", "content": prompt}, {"role": "user", "content": content}]
+    # reasoning.effort=low: OpenRouter-параметр, просим модель думать мало —
+    # «размышления» едят тот же max_tokens, что и ответ. Неподдержанное игнорится,
+    # при ошибке параметра ретраим без него.
+    for budget in (max_tokens, min(max_tokens * 20, 4096)):
+        for extra in ({"reasoning": {"effort": "low"}}, None):
+            try:
+                resp = await client.chat.completions.create(
+                    model=use_model,
+                    messages=msgs,  # type: ignore
+                    temperature=0.8,
+                    max_tokens=budget,
+                    extra_body=extra,
+                )
+            except Exception as e:
+                log.warning("Vega chat error model=%s extra=%s: %s", use_model, extra, e)
+                if extra is None:
+                    return None
+                continue
+            out = (resp.choices[0].message.content or "").strip()
+            if out:
+                if "[SILENT]" in out or out.startswith("[IGNORE]"):
+                    return None
+                return out
+            # пусто + length: reasoning съел весь бюджет → следующий, бóльший
+            fr = getattr(resp.choices[0], "finish_reason", None)
+            log.info("vega chat empty content finish=%s budget=%s", fr, budget)
+            if fr != "length":
+                return None
+            break
+    return None
