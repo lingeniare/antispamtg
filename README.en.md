@@ -99,13 +99,14 @@ Every message is checked via AI ([api.vega.chat](https://api.vega.chat) — Open
 - 🔞 Sex/erotica, 💊 drugs, ⚠️ illegal
 - 🎰 Casino/betting, 🪙 crypto-scam/pyramid, 🎮 gambling
 - 🤬 Profanity, 😡 insult, 🚫 hate, 💬 flood — ru/en/tr/uk/kk/ar/hi… incl. disguised `f**k`, `х*й`
-- 🖼️ Captions of photos/videos/docs are also checked
+- 🖼️ Media without captions (photos, stickers, GIFs, video thumbnails) — via vision model: porn, QR codes, drawn links
 
 **Highlights:**
 - 🕵️ **Probation instead of captcha:** new members (<24h or <5 msgs) get strict moderation — any link (incl. hidden text_link/buttons) is deleted, all media go through a vision model. Profile bio/name scan on join catches "check my profile" bait before the first message.
 - 🖼️ **Image vision:** photos/stickers/GIFs/video thumbnails without captions go to a vision model — porn, QR codes, drawn links are caught (`VISION_MODE=always|suspect|new_users|off`). `file_unique_id` cache — 100 reposts of one image = 1 call.
 - ✏️ **Edited messages** are re-checked — "post hello → edit to spam" doesn't work.
 - ⛔ **Permanent mute on first violation** (`MUTE_POLICY=permanent`, chat admins are skipped). Legacy escalation — `MUTE_POLICY=progressive`.
+- 💬 **Chat persona (Daenerys by default, editable prompt):** the bot can talk — call it "Дейнерис"/"Daenerys", @mention or reply to its message. Free will: it decides whether to answer or stay silent (`[SILENT]`). `CHAT_AMBIENT_PCT` — chance to chime in uninvited. Web search — `:online` suffix on the model (`CHAT_WEB_SEARCH=true` or `:online` in `VEGA_CHAT_MODEL`). Sees images in dialog. DMs — creators only (`ADMIN_USER_IDS`), strangers get a polite refusal. Persona — `config/chat_prompt.txt`, disable via `CHAT_ENABLED=false`.
 - 🌍 Multilingual auto-detect, English prompt for model
 - 🔇 Progressive: 2 violations/24h → 1d mute, +2/3d → 7d, further → permanent
 - 💾 Resilient — SQLite keeps last 3 msgs/chat, `violations`/`mute_state`, `member_state` (probation), `verdicts`/`media_verdicts` caches; `systemd Restart=always`
@@ -157,6 +158,22 @@ sudo bash uninstall.sh --keep-config
 `.env` + `config/config.yaml` (yaml wins) · `config/filter_prompt.txt` · `data/bot.db`
 
 AI provider: `VEGA_BASE_URL` — `https://api.vega.chat/v1` (default) or `https://openrouter.ai/api/v1` (OpenRouter). `VEGA_API_KEY` holds key for either provider (also supports aliases `OPENROUTER_API_KEY`/`AI_API_KEY`). Switch without reinstall: `nano .env` → `VEGA_BASE_URL` + `VEGA_API_KEY` → `sudo systemctl restart tg-antispam`.
+
+Full key list — `.env.example`. Main ones:
+
+| Key | Default | What it does |
+|---|---|---|
+| `VISION_MODE` | `suspect` | when to run vision: `always`/`suspect`/`new_users`/`off` |
+| `VEGA_VISION_MODEL` | = `VEGA_MODEL` | model for images |
+| `MUTE_POLICY` | `permanent` | `permanent` — mute forever on first violation; `progressive` — escalation |
+| `PROBATION_HOURS` / `PROBATION_MSGS` | `24` / `5` | new member probation |
+| `BIO_SCAN` | `true` | scan bio/name on join |
+| `RATE_LIMIT_COUNT` / `RATE_WINDOW_SEC` | `6` / `10` | per-user flood limit |
+| `CHAT_ENABLED` | `true` | chat persona on/off |
+| `VEGA_CHAT_MODEL` | = `VEGA_MODEL` | chat model; `:online` suffix = web search |
+| `CHAT_MAX_TOKENS` | `20000` | reasoning+answer+image budget (shortness lives in the prompt) |
+| `CHAT_AMBIENT_PCT` | `0` | % of untriggered messages the persona sees and decides on |
+| `ADMIN_USER_IDS` | — | bot creators: DMs + commands |
 
 ---
 

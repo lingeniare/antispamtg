@@ -107,7 +107,7 @@ Self-hosted AI-бот для защиты Telegram групп, супергру�
 - 🖼️ **Image vision:** фото/стикеры/GIF/превью видео без подписи идут в vision-модель — порно-картинки, QR-коды и нарисованные ссылки ловятся (`VISION_MODE=always|suspect|new_users|off`). Кэш по `file_unique_id` — 100 репостов одной картинки = 1 вызов.
 - ✏️ **Отредактированные сообщения** проверяются заново — трюк «написал привет → поменял на спам» не работает.
 - ⛔ **Перманентный мьют с первого нарушения** (`MUTE_POLICY=permanent`, админы чата пропускаются). Старая эскалация — `MUTE_POLICY=progressive`.
-- 💬 **Личность ВЕГА:** бот умеет общаться — позови «Вега», упомяни @bot или ответь на её сообщение. Решает сама, отвечать или промолчать (`[SILENT]`). Веб-поиск — суффикс `:online` к модели (`CHAT_WEB_SEARCH=true`). ЛС отвечает админам/whitelist. Промпт — `config/chat_prompt.txt`.
+- 💬 **Личность (по умолчанию Дейнерис, промпт редактируется):** бот умеет общаться — позови «Дейнерис»/«Дени», упомяни @bot или ответь на её сообщение. Свобода воли: сама решает, отвечать или промолчать (`[SILENT]`). `CHAT_AMBIENT_PCT` — шанс встрять в разговор без обращения. Веб-поиск — суффикс `:online` к модели (`CHAT_WEB_SEARCH=true` или `:online` прямо в `VEGA_CHAT_MODEL`). Видит картинки в диалоге. ЛС — только создателям (`ADMIN_USER_IDS`), чужим — вежливый отказ. Промпт — `config/chat_prompt.txt`, выключается `CHAT_ENABLED=false`.
 - 🌍 Мультиязычность — авто-детект, промпт на английском для модели, работает на ru/en/tr/uk/kk/ar/hi/es/de/fr/zh
 - 🔇 Прогрессивные наказания: 2 нарушения/24ч → мьют 1 день, +2/3д → 7 дней, дальше → перманент
 - 💾 Отказоустойчивость — SQLite `data/bot.db` хранит 3 последних сообщения/чат, `violations`/`mute_state`, `member_state` (probation), кэши вердиктов `verdicts`/`media_verdicts`; `systemd Restart=always`
@@ -161,8 +161,24 @@ sudo bash uninstall.sh --keep-config # с бэкапом в /tmp/tg-antispam-bac
 
 Провайдер AI: `VEGA_BASE_URL` — `https://api.vega.chat/v1` (по дефолту) или `https://openrouter.ai/api/v1` (OpenRouter). `VEGA_API_KEY` хранит ключ любого провайдера (также поддерживаются алиасы `OPENROUTER_API_KEY`/`AI_API_KEY`). Переключить без переустановки: `nano .env` → `VEGA_BASE_URL` + `VEGA_API_KEY` → `sudo systemctl restart tg-antispam`.
 
+Полный список ключей — `.env.example`. Основные:
+
+| Ключ | Дефолт | Что делает |
+|---|---|---|
+| `VISION_MODE` | `suspect` | когда гонять vision: `always`/`suspect`/`new_users`/`off` |
+| `VEGA_VISION_MODEL` | = `VEGA_MODEL` | модель для картинок |
+| `MUTE_POLICY` | `permanent` | `permanent` — мьют навсегда с первого; `progressive` — эскалация |
+| `PROBATION_HOURS` / `PROBATION_MSGS` | `24` / `5` | испытательный срок новичков |
+| `BIO_SCAN` | `true` | скан bio/имени при входе |
+| `RATE_LIMIT_COUNT` / `RATE_WINDOW_SEC` | `6` / `10` | флуд-лимит на юзера |
+| `CHAT_ENABLED` | `true` | разговорная личность вкл/выкл |
+| `VEGA_CHAT_MODEL` | = `VEGA_MODEL` | модель для чата; суффикс `:online` = веб-поиск |
+| `CHAT_MAX_TOKENS` | `20000` | бюджет reasoning+ответ+image (короткость ответа — в промпте) |
+| `CHAT_AMBIENT_PCT` | `0` | % сообщений без триггера, которые личность увидит сама |
+| `ADMIN_USER_IDS` | — | создатели бота: ЛС + команды |
+
 ### Как это работает
-`on_text`/`on_media`(фото/стикеры/GIF/видео/кружки/документы)/`edited_message`/`channel_post` → `save_recent_message` → whitelist/admins → rate-limit → скрытые ссылки (entities+кнопки) → probation (новый юзер + ссылка = удаление) → кэш вердиктов → эвристика `link+banned` → `api.vega.chat/v1/chat/completions` (текст + vision для медиа) → `JSON {spam,reason,category}` → `delete()` + `🗑️ Причина: ...` → `violations` → перманентный мьют. При ошибке LLM — strict-fallback (ссылки/форварды всё равно чистятся). Вход юзера → `member_state` + скан bio/имени.
+`on_text`/`on_media`(фото/стикеры/GIF/видео/кружки/документы)/`edited_message`/`channel_post` → `save_recent_message` → whitelist/admins → rate-limit → скрытые ссылки (entities+кнопки) → probation (новый юзер + ссылка = удаление) → кэш вердиктов → эвристика `link+banned` → `api.vega.chat/v1/chat/completions` (текст + vision для медиа) → `JSON {spam,reason,category}` → `delete()` + `🗑️ Причина: ...` → `violations` → перманентный мьют. При ошибке LLM — strict-fallback (ссылки/форварды всё равно чистятся). Вход юзера → `member_state` + скан bio/имени. Чистое сообщение → чат-триггеры (имя/@mention/reply + `CHAT_AMBIENT_PCT`) → `ai_chat_reply` (`chat_prompt.txt`, reasoning.effort=low, `[SILENT]` = молчание) → `reply`.
 
 ### Разработка
 
