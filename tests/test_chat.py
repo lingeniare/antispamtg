@@ -124,13 +124,23 @@ def _llm(monkeypatch, spam=False, chat="Привет от ВЕГИ!", calls=None
 
 
 async def test_chat_on_name(env, monkeypatch):
-    """«привет вега» в группе → чистая модерация → ВЕГА отвечает."""
+    """«привет дейнерис» в группе → чистая модерация → отвечает."""
     _llm(monkeypatch)
     bot = FakeBot()
-    m = make_msg(bot, text="привет вега, как дела")
+    m = make_msg(bot, text="привет дейнерис, как дела")
     await _old_member(env, m.chat.id, m.from_user.id)
     await handlers._process(m)
     assert m.replies == ["Привет от ВЕГИ!"]
+
+
+async def test_chat_old_name_still_triggers(env, monkeypatch):
+    """Старое «вега» тоже триггерит — бот ещё @spamvega_bot."""
+    _llm(monkeypatch)
+    bot = FakeBot()
+    m = make_msg(bot, text="вега ты тут")
+    await _old_member(env, m.chat.id, m.from_user.id)
+    await handlers._process(m)
+    assert len(m.replies) == 1
 
 
 async def test_chat_on_mention(env, monkeypatch):

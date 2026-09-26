@@ -51,7 +51,7 @@ _suppressed: dict[int, int] = {}  # chat_id -> сколько уведомлен
 _summary_task: dict[int, asyncio.Task] = {}
 _PROFILE_SCANNED: set[tuple[int, int]] = set()  # био сканим один раз за процесс
 _bot_me_cache: tuple[float, object | None] = (0, None)
-_NAME_RE = re.compile(r"\b(вега|vega|вегочка|вегушка)\b", re.I)
+_NAME_RE = re.compile(r"\b(дейнерис|дени|daenerys|dany|кхалиси|khaleesi|вега|vega)\b", re.I)
 
 
 async def _bot_me(bot) -> object | None:
@@ -588,7 +588,7 @@ async def _process(m: Message) -> None:
 @router.message(Command("start"))
 async def cmd_start(m: Message) -> None:
     await m.answer(
-        "Привет! Я ВЕГА — антиспам-бот и немного личность. Обращайся — позови «Вега» или ответь на моё сообщение.\n"
+        "Привет! Я Дейнерис — антиспам-бот и мать драконов антиспама. Обращайся — позови «Дейнерис»/«Дени» или ответь на моё сообщение.\n"
         "Добавь меня в группу/канал и выдай права админа (удаление сообщений + бан).\n"
         "⚠️ Для КАНАЛА: добавь меня ещё и в группу комментариев (Канал → Настройки → Обсуждение → Группа), иначе не увижу комментарии. Там тоже дай админа.\n"
         "Команды в ЛС (только для админов):\n"
