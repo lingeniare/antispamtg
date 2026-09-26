@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     # % чистых сообщений, которые ВЕГА увидит БЕЗ триггера и решит сама — встрять или молчать.
     # 0 = только по триггерам. Каждое ambient-сообщение = 1 LLM-вызов (цена свободы воли).
     chat_ambient_pct: int = Field(default=0, alias="CHAT_AMBIENT_PCT")
+    # false (дефолт): после даунтайма доедаем буфер апдейтов Telegram (~24ч) и чистим
+    # спам задним числом; true — выбросить очередь при старте (старое поведение)
+    drop_pending_updates: bool = Field(default=False, alias="DROP_PENDING_UPDATES")
 
     model_config = {"env_file": str(_PROJECT_ROOT / ".env"), "extra": "ignore", "populate_by_name": True}
 

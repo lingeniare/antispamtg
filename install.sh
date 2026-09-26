@@ -154,6 +154,9 @@ fi
 sudo chown -R tg-antispam:tg-antispam "$INSTALL_DIR/data" 2>/dev/null || true
 sudo chown tg-antispam:tg-antispam "$INSTALL_DIR/.env" 2>/dev/null || true
 sudo chmod 600 "$INSTALL_DIR/.env" 2>/dev/null || true
+# config.yaml тоже содержит токен и API-ключ — те же 600
+sudo chown tg-antispam:tg-antispam "$INSTALL_DIR/config/config.yaml" 2>/dev/null || true
+sudo chmod 600 "$INSTALL_DIR/config/config.yaml" 2>/dev/null || true
 
 # systemd
 echo "[5/6] Настройка systemd..."

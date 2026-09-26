@@ -45,13 +45,33 @@ log = logging.getLogger("tg-antispam")
 # --- in-memory состояние ---
 _admins_cache: dict[int, tuple[float, set[int]]] = {}  # chat_id -> (ts, admin_ids)
 _ADMINS_TTL = 600
-_rate: dict[tuple[int, int], deque[float]] = {}  # (chat_id, user_id) -> ts окна
+_rate: dict[tuple[int, int], deque[float]] = {}  # (chat_id, user_id) -> ts окна (модерация)
+_chat_rate: dict[tuple[int, int], deque[float]] = {}  # отдельный счётчик чата — иначе модерация+чат считают дважды
 _notify_ts: dict[int, deque[float]] = {}  # chat_id -> ts отправленных уведомлений
 _suppressed: dict[int, int] = {}  # chat_id -> сколько уведомлений подавлено
 _summary_task: dict[int, asyncio.Task] = {}
 _PROFILE_SCANNED: set[tuple[int, int]] = set()  # био сканим один раз за процесс
 _bot_me_cache: tuple[float, object | None] = (0, None)
 _NAME_RE = re.compile(r"\b(дейнерис|дени|daenerys|dany|кхалиси|khaleesi|вега|vega)\b", re.I)
+
+
+def _is_stale(m: Message, limit_sec: int = 300) -> bool:
+    """Сообщение из буфера даунтайма: модерировать можно, отвечать — нет
+    (Дейнерис не должна отвечать на вчерашние «приветы» после рестарта)."""
+    d = getattr(m, "edit_date", None) or getattr(m, "date", None)
+    if not d:
+        return False
+    if getattr(d, "tzinfo", None) is None:
+        d = d.replace(tzinfo=UTC)
+    return (datetime.now(UTC) - d).total_seconds() > limit_sec
+# поисковый интент: с такими словами чат-ответ идёт через :online (веб-поиск)
+_WEB_RE = re.compile(
+    r"(найди|поищи|погугли|загугли|поиск|новост|актуальн|свеж|последн|"
+    r"сейчас|сегодня|на данный момент|сколько стоит|цена|курс|погода|выиграл|"
+    r"когда вышл|какая версия|latest|search|look ?up|news|today|current|"
+    r"right now|price|weather|who won|recent)",
+    re.I,
+)
 
 
 async def _bot_me(bot) -> object | None:
@@ -177,16 +197,24 @@ def _notify(bot, chat_id: int, text: str) -> None:
     asyncio.create_task(_notify_and_cleanup(bot, chat_id, text))
 
 
-def _is_rate_limited(chat_id: int, user_id: int, count: int, window: int) -> bool:
+def _rl(store: dict[tuple[int, int], deque[float]], chat_id: int, user_id: int, count: int, window: int) -> bool:
     now = time.monotonic()
-    if len(_rate) > 5000:  # защита от раздувания мапы на больших чатах
-        for k in [k for k, v in _rate.items() if not v]:
-            _rate.pop(k, None)
-    dq = _rate.setdefault((chat_id, user_id), deque())
+    if len(store) > 5000:  # защита от раздувания мапы на больших чатах
+        for k in [k for k, v in store.items() if not v]:
+            store.pop(k, None)
+    dq = store.setdefault((chat_id, user_id), deque())
     while dq and now - dq[0] > window:
         dq.popleft()
     dq.append(now)
     return len(dq) > count
+
+
+def _is_rate_limited(chat_id: int, user_id: int, count: int, window: int) -> bool:
+    return _rl(_rate, chat_id, user_id, count, window)
+
+
+def _is_rate_limited_chat(chat_id: int, user_id: int, count: int, window: int) -> bool:
+    return _rl(_chat_rate, chat_id, user_id, count, window)
 
 
 async def _is_chat_admin(m: Message) -> bool:
@@ -249,7 +277,7 @@ async def _punish(bot, chat_id: int, user_id: int, category: str, reason: str, f
         log.warning("add_violation failed: %s", e)
         c24, c3d, level = 1, 1, 0
     s = load_settings()
-    uname = f"<a href='tg://user?id={user_id}'>{full_name}</a>"
+    uname = f"<a href='tg://user?id={user_id}'>{html.escape(full_name)}</a>"
     try:
         if s.mute_policy == "permanent":
             if s.ban_on_repeat_spam:
@@ -291,7 +319,7 @@ async def _handle_spam(m: Message, result: dict) -> None:
         log.warning("delete failed: %s", e)
     try:
         uname = (
-            f"<a href='tg://user?id={m.from_user.id}'>{m.from_user.full_name}</a>"
+            f"<a href='tg://user?id={m.from_user.id}'>{html.escape(m.from_user.full_name)}</a>"
             if m.from_user
             else "пользователя"
         )
@@ -467,7 +495,7 @@ async def _chat_reply(m: Message, force: bool = False) -> None:
     if not s.chat_enabled:
         return
     uid = m.from_user.id if m.from_user else 0
-    if uid and _is_rate_limited(m.chat.id, uid, s.rate_limit_count, s.rate_window_sec):
+    if uid and _is_rate_limited_chat(m.chat.id, uid, s.rate_limit_count, s.rate_window_sec):
         return
     if not force and not await _chat_triggered(m):
         # свобода воли: с шансом chat_ambient_pct ВЕГА сама посмотрит сообщение
@@ -508,7 +536,9 @@ async def _chat_reply(m: Message, force: bool = False) -> None:
     if not prompt:
         return
     model = s.vega_chat_model or s.vega_model
-    out = await ai_chat_reply(prompt, content, model, s.chat_max_tokens, s.chat_web_search)
+    # веб-поиск по необходимости: CHAT_WEB_SEARCH=true — всегда; иначе — только при поисковом интенте
+    web = s.chat_web_search or bool(_WEB_RE.search(text))
+    out = await ai_chat_reply(prompt, content, model, s.chat_max_tokens, web)
     if out:
         log.info("vega chat reply chat=%s len=%s", m.chat.id, len(out))
         try:
@@ -531,6 +561,8 @@ async def _handle_private(m: Message) -> None:
     отказ в характере ВЕГИ (без LLM-вызова), со троттлингом от флуда."""
     if not m.from_user:
         return
+    if _is_stale(m):
+        return  # старый апдейт из буфера — ЛС не отвечаем задним числом
     if is_admin(m.from_user.id):
         await _chat_reply(m, force=True)
         return
@@ -558,13 +590,22 @@ async def _process(m: Message) -> None:
     except Exception as e:
         log.warning("save_recent failed: %s", e)
 
+    # чужие боты: модерируем (бот-спаммер реален), но НЕ разговариваем —
+    # иначе петля: бот отвечает боту → бот отвечает → бесконечные LLM-вызовы
+    if m.from_user and m.from_user.is_bot:
+        result = await _moderate(m)
+        if result.get("spam"):
+            await _handle_spam(m, result)
+        return
+
     # свои (whitelist/админы бота/админы чата) модерацию пропускаем,
     # но разговаривать с ВЕГАй они могут — иначе админ не услышит ответа никогда
     privileged = bool(m.from_user) and (
         is_whitelisted(m.from_user.id) or is_admin(m.from_user.id)
     )
     if privileged or await _is_chat_admin(m):
-        await _chat_reply(m)
+        if not _is_stale(m):
+            await _chat_reply(m)
         return
 
     result = await _moderate(m)
@@ -581,8 +622,10 @@ async def _process(m: Message) -> None:
         await _handle_spam(m, result)
     elif m.from_user:
         await bump_member_msgs(m.chat.id, m.from_user.id)
-        # чистое сообщение → ВЕГА может ответить, если к ней обратились
-        await _chat_reply(m)
+        # чистое сообщение → ВЕГА может ответить, если к ней обратились;
+        # старые (из буфера даунтайма) — только модерируем
+        if not _is_stale(m):
+            await _chat_reply(m)
 
 
 @router.message(Command("start"))
@@ -665,10 +708,12 @@ async def on_media(m: Message) -> None:
 
 # отредактированные сообщения проверяем заново — иначе спам подменой после проверки проходит
 @router.edited_message(F.text)
+@router.edited_channel_post(F.text)
 async def on_edited_text(m: Message) -> None:
     await _process(m)
 
 
 @router.edited_message(F.photo | F.document | F.video | F.animation | F.sticker | F.video_note)
+@router.edited_channel_post(F.photo | F.document | F.video | F.animation | F.sticker | F.video_note)
 async def on_edited_media(m: Message) -> None:
     await _process(m)

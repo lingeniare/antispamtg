@@ -64,6 +64,8 @@ def make_msg(bot, uid=None, chat_type="supergroup", **kw):
         "reply_to_message": None,
         "forward_origin": None,
         "sender_chat": None,
+        "date": None,
+        "edit_date": None,
         "bot": bot,
         "new_chat_members": None,
     }
@@ -116,7 +118,7 @@ def _llm(monkeypatch, spam=False, chat="Привет от ВЕГИ!", calls=None
 
     async def fake_chat(prompt, content, model, max_tokens, web_search=False):
         if calls is not None:
-            calls.append(content)
+            calls.append({"content": content, "web": web_search, "model": model})
         return chat
 
     monkeypatch.setattr(handlers, "ai_is_spam", fake_spam)
@@ -281,6 +283,54 @@ async def test_chat_admin_gets_reply(env, monkeypatch):
     m = make_msg(bot, uid=uid, text="вега, ты тут?")
     await handlers._process(m)
     assert len(calls) == 1 and len(m.replies) == 1
+
+
+async def test_web_search_on_demand(env, monkeypatch):
+    """Поисковый интент → :online; обычный текст → без веба."""
+    calls = []
+    _llm(monkeypatch, calls=calls)
+    bot = FakeBot()
+    m = make_msg(bot, text="дейнерис, что нового в мире сейчас?")
+    await _old_member(env, m.chat.id, m.from_user.id)
+    await handlers._process(m)
+    assert len(calls) == 1 and calls[0]["web"] is True
+    assert not calls[0]["model"].endswith(":online")  # суффикс добавляет клиент
+
+
+async def test_no_web_for_smalltalk(env, monkeypatch):
+    """«Привет» — без поискового интента, веб не включается."""
+    calls = []
+    _llm(monkeypatch, calls=calls)
+    bot = FakeBot()
+    m = make_msg(bot, text="дейнерис привет как ты")
+    await _old_member(env, m.chat.id, m.from_user.id)
+    await handlers._process(m)
+    assert len(calls) == 1 and calls[0]["web"] is False
+
+
+async def test_stale_message_no_chat(env, monkeypatch):
+    """Сообщение из буфера даунтайма: модерируется, но ответа нет."""
+    from datetime import UTC, datetime, timedelta
+
+    calls = []
+    _llm(monkeypatch, calls=calls)
+    bot = FakeBot()
+    m = make_msg(bot, text="дейнерис привет", date=datetime.now(UTC) - timedelta(hours=2))
+    await _old_member(env, m.chat.id, m.from_user.id)
+    await handlers._process(m)
+    assert calls == [] and m.replies == []
+
+
+async def test_bot_sender_no_chat(env, monkeypatch):
+    """Чужой бот: модерация идёт, разговор — нет (анти-петля)."""
+    calls = []
+    _llm(monkeypatch, calls=calls)
+    bot = FakeBot()
+    m = make_msg(bot, text="дейнерис привет")
+    m.from_user.is_bot = True
+    await _old_member(env, m.chat.id, m.from_user.id)
+    await handlers._process(m)
+    assert calls == [] and m.replies == []
 
 
 async def test_ambient_zero_no_call(env, monkeypatch):

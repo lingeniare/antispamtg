@@ -8,7 +8,7 @@ import httpx
 from openai import AsyncOpenAI
 
 from src.config import filter_prompt, load_settings
-from src.filters.content import CASINO_RE, DRUGS_RE, SEX_RE, has_banned_topic, has_link
+from src.filters.content import CASINO_RE, DRUGS_RE, SEX_RE, has_banned_topic, has_link, has_url
 
 SYSTEM_FALLBACK = 'Ты модератор. Ответь JSON {"spam":bool,"reason":str,"category":str}'
 
@@ -49,10 +49,11 @@ def heuristic_spam(text: str, is_forward: bool = False) -> tuple[bool, str] | No
 
 def strict_fallback(text: str, is_forward: bool = False) -> dict | None:
     """Жёсткие правила на случай недоступности LLM (вместо чистого fail-open).
-    Ссылка (включая скрытые [LINK:]) или форвард с запрещённой темой = спам."""
+    Реальная ссылка (включая скрытые [LINK:]) или форвард с запрещённой темой = спам.
+    has_url, не has_link: @mention в «спасибо @friend» не должен давать пермач при падении API."""
     if not text:
         return None
-    if has_link(text):
+    if has_url(text):
         return {
             "spam": True,
             "reason": "strict fallback: link while LLM down",
