@@ -4,13 +4,23 @@ bot_token: "PUT_TOKEN_HERE"
 vega_api_key: "PUT_API_KEY_HERE"
 vega_base_url: "https://api.vega.chat/v1"
 vega_model: "z-ai/glm-5.3-flash"
+# vision-модель для модерации картинок/стикеров/превью видео; пусто = vega_model
+vega_vision_model: ""
 allowed_chats: []  # [-100123..., "@channel"]
 whitelist_users: [] # [123456]
 admin_users: []
 default_language: "ru"  # ru|en|tr|uk|kz ...
 filter_prompt_path: "config/filter_prompt.txt"
-captcha_timeout_sec: 120
 delete_spam: true
-mute_on_captcha_fail: true
+# permanent — перманентный мьют с первого нарушения; progressive — эскалация 1д/7д/пермач
+mute_policy: "permanent"
+# always — все медиа через vision; new_users — новые юзеры+форварды; suspect — +ссылка в подписи; off
+vision_mode: "suspect"
+# испытательный срок вместо капчи: новый юзер = < probation_hours ч или < probation_msgs сообщений
+probation_hours: 24
+probation_msgs: 5
+# сканировать bio/имя профиля при входе
+bio_scan: true
 ban_on_repeat_spam: false
-# image_moderation: true  # вкл когда появится vision-модель
+rate_limit_count: 6
+rate_window_sec: 10

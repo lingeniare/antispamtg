@@ -115,7 +115,8 @@ ALLOWED_CHATS=$ALLOWED
 WHITELIST_USERS=$WHITELIST
 DEFAULT_LANGUAGE=$LANG
 FILTER_PROMPT_PATH=config/filter_prompt.txt
-CAPTCHA_TIMEOUT_SEC=120
+MUTE_POLICY=permanent
+VISION_MODE=suspect
 DELETE_SPAM=true
 EOF
   echo "  -> .env создан (провайдер: $VEGA_BASE_URL)"
@@ -134,7 +135,11 @@ allowed_chats: [$(echo $ALLOWED | sed 's/,/, /g')]
 whitelist_users: [$(echo $WHITELIST | sed 's/,/, /g')]
 default_language: "$LANG"
 filter_prompt_path: "config/filter_prompt.txt"
-captcha_timeout_sec: 120
+mute_policy: "permanent"
+vision_mode: "suspect"
+probation_hours: 24
+probation_msgs: 5
+bio_scan: true
 delete_spam: true
 EOF
   echo "  -> config/config.yaml создан"

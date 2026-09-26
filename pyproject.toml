@@ -1,7 +1,7 @@
 [project]
 name = "tg-antispam-bot"
 version = "0.1.0"
-description = "AI Anti-Spam Bot для Telegram — капча-ловушка, AI-фильтр через api.vega.chat, антиспам"
+description = "AI Anti-Spam Bot для Telegram — image vision, испытательный срок новичков, AI-фильтр через api.vega.chat"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

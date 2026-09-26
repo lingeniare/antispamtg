@@ -36,10 +36,25 @@ class Settings(BaseSettings):
     default_language: str = Field(default="ru", alias="DEFAULT_LANGUAGE")
     admin_user_ids: str = Field(default="", alias="ADMIN_USER_IDS")
     filter_prompt_path: str = Field(default="config/filter_prompt.txt", alias="FILTER_PROMPT_PATH")
-    captcha_timeout_sec: int = Field(default=120, alias="CAPTCHA_TIMEOUT_SEC")
     delete_spam: bool = Field(default=True, alias="DELETE_SPAM")
-    mute_on_captcha_fail: bool = Field(default=True, alias="MUTE_ON_CAPTCHA_FAIL")
     ban_on_repeat_spam: bool = Field(default=False, alias="BAN_ON_REPEAT_SPAM")
+    # наказание за спам: "permanent" — перманентный мьют с первого нарушения,
+    # "progressive" — старая эскалация 1д/7д/пермач по счётчику нарушений
+    mute_policy: str = Field(default="permanent", alias="MUTE_POLICY")
+    # image vision: always — сканить все медиа, new_users — только новые юзеры и форварды,
+    # suspect — новые юзеры/форварды/медиа со ссылкой в подписи, off — выключено
+    vision_mode: str = Field(default="suspect", alias="VISION_MODE")
+    # vision-модель; пусто = использовать vega_model (glm-5.3-flash и gpt-6-luna уже умеют image+video)
+    vega_vision_model: str = Field(default="", alias="VEGA_VISION_MODEL")
+    # испытательный срок вместо капчи: юзер "новый" пока < PROBATION_HOURS часов в чате
+    # или < PROBATION_MSGS проверенных сообщений
+    probation_hours: int = Field(default=24, alias="PROBATION_HOURS")
+    probation_msgs: int = Field(default=5, alias="PROBATION_MSGS")
+    # сканировать bio/имя профиля при входе и первом сообщении
+    bio_scan: bool = Field(default=True, alias="BIO_SCAN")
+    # сообщений в RATE_WINDOW_SEC до вердикта "flood" без LLM
+    rate_limit_count: int = Field(default=6, alias="RATE_LIMIT_COUNT")
+    rate_window_sec: int = Field(default=10, alias="RATE_WINDOW_SEC")
 
     model_config = {"env_file": str(_PROJECT_ROOT / ".env"), "extra": "ignore", "populate_by_name": True}
 
@@ -98,6 +113,14 @@ def _merge_yaml_to_kwargs(y: dict) -> dict:
         "vega_model": "vega_model",
         "default_language": "default_language",
         "filter_prompt_path": "filter_prompt_path",
+        "mute_policy": "mute_policy",
+        "vision_mode": "vision_mode",
+        "vega_vision_model": "vega_vision_model",
+        "probation_hours": "probation_hours",
+        "probation_msgs": "probation_msgs",
+        "bio_scan": "bio_scan",
+        "rate_limit_count": "rate_limit_count",
+        "rate_window_sec": "rate_window_sec",
     }
     for k, sk in mapping.items():
         if y.get(k) not in (None, ""):
@@ -113,7 +136,15 @@ def _merge_yaml_to_kwargs(y: dict) -> dict:
         v = ",".join(str(x) for x in y["admin_users"])
         out.setdefault("admin_user_ids", v)
     # bool/int из yaml
-    for k in ("captcha_timeout_sec", "delete_spam", "mute_on_captcha_fail", "ban_on_repeat_spam"):
+    for k in (
+        "delete_spam",
+        "ban_on_repeat_spam",
+        "bio_scan",
+        "probation_hours",
+        "probation_msgs",
+        "rate_limit_count",
+        "rate_window_sec",
+    ):
         if k in y and y[k] is not None:
             out[k] = y[k]
     return out
@@ -142,6 +173,14 @@ def load_settings(*, use_cache: bool = True) -> Settings:
         "allowed_chats": ("ALLOWED_CHATS",),
         "whitelist_users": ("WHITELIST_USERS",),
         "admin_user_ids": ("ADMIN_USER_IDS",),
+        "mute_policy": ("MUTE_POLICY",),
+        "vision_mode": ("VISION_MODE",),
+        "vega_vision_model": ("VEGA_VISION_MODEL",),
+        "probation_hours": ("PROBATION_HOURS",),
+        "probation_msgs": ("PROBATION_MSGS",),
+        "bio_scan": ("BIO_SCAN",),
+        "rate_limit_count": ("RATE_LIMIT_COUNT",),
+        "rate_window_sec": ("RATE_WINDOW_SEC",),
     }
     for k, envks in env_alias.items():
         if k in yaml_kwargs and any(_os.getenv(e) for e in envks):

@@ -8,16 +8,14 @@ import httpx
 from openai import AsyncOpenAI
 
 from src.config import filter_prompt, load_settings
+from src.filters.content import CASINO_RE, DRUGS_RE, SEX_RE, has_banned_topic, has_link
 
 SYSTEM_FALLBACK = 'Ты модератор. Ответь JSON {"spam":bool,"reason":str,"category":str}'
 
-_link_re = re.compile(
-    r"(https?://|t\.me/|telegram\.me/|www\.|@\w+|\b[\w-]+\.(ru|com|net|io|me|xyz|online|shop|site|info|biz|pro|fun|top|click|link|store|app|su|by|ua|kz|рф)\b)",
-    re.I,
-)
-_casino_re = re.compile(r"(казино|casino|1xbet|ставки|слот|jackpot|крипта|биток|инвест|заработай|пирамида)", re.I)
-_sex_re = re.compile(r"(onlyfans|эскорт|интим|порно|sex|18\+|приват|эротик)", re.I)
-_drugs_re = re.compile(r"(закладк|наркот|мефедрон|шишки|амфетамин|cocaine|weed)", re.I)
+# совместимость со старыми именами
+_casino_re = CASINO_RE
+_sex_re = SEX_RE
+_drugs_re = DRUGS_RE
 
 _client: AsyncOpenAI | None = None
 _client_key: tuple[str, str] | None = None
@@ -43,16 +41,45 @@ def heuristic_spam(text: str, is_forward: bool = False) -> tuple[bool, str] | No
     """Быстрые эвристики до вызова LLM. Возвращает (is_spam, reason) или None если неясно."""
     if not text:
         return None
-    has_link = bool(_link_re.search(text))
-    if has_link and (_casino_re.search(text) or _sex_re.search(text) or _drugs_re.search(text)):
+    if has_link(text) and has_banned_topic(text):
         return True, "heuristic: link + banned topic"
-    _ = is_forward  # зарезервирован для будущих строгих правил; сейчас LLM решает по [FORWARDED]
+    _ = is_forward  # зарезервировано; [FORWARDED] решает LLM/strict-fallback
     return None
 
 
-async def ai_is_spam(text: str, image_url: str | None = None, is_forward: bool = False) -> dict:
+def strict_fallback(text: str, is_forward: bool = False) -> dict | None:
+    """Жёсткие правила на случай недоступности LLM (вместо чистого fail-open).
+    Ссылка (включая скрытые [LINK:]) или форвард с запрещённой темой = спам."""
+    if not text:
+        return None
+    if has_link(text):
+        return {
+            "spam": True,
+            "reason": "strict fallback: link while LLM down",
+            "category": "link",
+            "via": "strict",
+        }
+    if is_forward and has_banned_topic(text):
+        return {
+            "spam": True,
+            "reason": "strict fallback: forwarded banned topic",
+            "category": "other",
+            "via": "strict",
+        }
+    return None
+
+
+async def ai_is_spam(
+    text: str,
+    image_url: str | None = None,
+    is_forward: bool = False,
+    model: str | None = None,
+    context: list[str] | None = None,
+) -> dict:
     """
-    Возвращает {"spam":bool,"reason":str,"category":str,"via":"heuristic|llm"}
+    Возвращает {"spam":bool,"reason":str,"category":str,"via":"heuristic|llm"}.
+    При ошибке LLM — {"spam": False, "error": True, ...}: вызывающий код решает
+    через strict_fallback, чистого fail-open больше нет.
     """
     h = heuristic_spam(text or "", is_forward=is_forward)
     if h is not None:
@@ -61,25 +88,28 @@ async def ai_is_spam(text: str, image_url: str | None = None, is_forward: bool =
 
     s = load_settings()
     if not s.vega_api_key:
-        has_link = bool(_link_re.search(text or ""))
-        # без ключа: форвард с ссылкой тоже считаем спамом
-        return {
-            "spam": has_link,
-            "reason": "no api key, link heuristic" + (" + forward" if is_forward and has_link else ""),
-            "category": "link" if has_link else "ok",
-            "via": "heuristic",
-        }
+        if has_link(text or ""):
+            return {
+                "spam": True,
+                "reason": "no api key, link heuristic" + (" + forward" if is_forward else ""),
+                "category": "link",
+                "via": "heuristic",
+            }
+        return {"spam": False, "reason": "no api key", "category": "ok", "via": "heuristic"}
 
     prompt = filter_prompt() or SYSTEM_FALLBACK
     client = _get_client(s.vega_api_key, s.vega_base_url)
     prefix = "[FORWARDED] " if is_forward else ""
-    content: list[dict] = [{"type": "text", "text": f"Сообщение:\n{prefix}{text[:3000]}\n\nВерни только JSON."}]
+    ctx = ""
+    if context:
+        ctx = "Контекст чата (предыдущие сообщения):\n" + "\n".join(f"- {c[:200]}" for c in context[:3]) + "\n"
+    content: list[dict] = [{"type": "text", "text": f"{ctx}Сообщение:\n{prefix}{text[:3000]}\n\nВерни только JSON."}]
     if image_url:
         content.append({"type": "image_url", "image_url": {"url": image_url}})
 
     try:
         resp = await client.chat.completions.create(
-            model=s.vega_model,
+            model=model or s.vega_model,
             messages=[{"role": "system", "content": prompt}, {"role": "user", "content": content}],  # type: ignore
             temperature=0.1,
             max_tokens=200,
@@ -96,5 +126,5 @@ async def ai_is_spam(text: str, image_url: str | None = None, is_forward: bool =
             "raw": raw[:500],
         }
     except Exception as e:
-        log.warning("Vega LLM error model=%s: %s", s.vega_model, e)
-        return {"spam": False, "reason": f"llm error: {e}", "category": "error", "via": "llm"}
+        log.warning("Vega LLM error model=%s: %s", model or s.vega_model, e)
+        return {"spam": False, "reason": f"llm error: {e}", "category": "error", "via": "llm", "error": True}
